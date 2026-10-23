@@ -44,6 +44,7 @@ class SentinelConfig:
     block_log: str = "/var/log/sentinel/blocked.jsonl"
     verbose: bool = False
     admin_key: str = ""
+    block_upload_progress: bool = True
 
     @classmethod
     def from_env(cls) -> "SentinelConfig":
@@ -62,6 +63,9 @@ class SentinelConfig:
         cfg.log_file = os.getenv("SENTINEL_LOG_FILE", cfg.log_file)
         cfg.block_log = os.getenv("SENTINEL_BLOCK_LOG", cfg.block_log)
         cfg.verbose = os.getenv("SENTINEL_VERBOSE", "").lower() in ("1", "true", "yes")
+        cfg.block_upload_progress = os.getenv(
+            "SENTINEL_BLOCK_UPLOAD_PROGRESS", "true"
+        ).lower() not in ("0", "false", "no", "off")
         cfg.admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
         if not cfg.admin_key:
             cfg.admin_key = secrets.token_urlsafe(32)
@@ -339,6 +343,21 @@ class SentinelProxy:
             self.log.debug(f"REQ {client_ip} {request.method} {path}")
 
         body = await request.read()
+
+        if self.cfg.block_upload_progress and b"PHP_SESSION_UPLOAD_PROGRESS" in body:
+            ct = (request.content_type or "").lower()
+            if "multipart" in ct:
+                self.metrics.blocked += 1
+                self.log.warning(
+                    f"BLOCKED {client_ip} {request.method} {path} — "
+                    f"PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)"
+                )
+                await self._log_blocked(request, body, client_ip, ["upload_progress_blocked"])
+                return web.Response(
+                    status=403,
+                    text="Request blocked by PHP Sentinel. session.upload_progress exploit vector detected.\n",
+                    content_type="text/plain",
+                )
 
         if self.cfg.max_replay_body and len(body) > self.cfg.max_replay_body:
             self.log.info(
