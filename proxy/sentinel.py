@@ -559,7 +559,6 @@ class SentinelProxy:
                 self.cfg.webhook_url,
                 json={"event": "request_blocked", "source": "php-sentinel", **entry},
                 timeout=aiohttp.ClientTimeout(total=5),
-                ssl=False,
             ) as resp:
                 if resp.status >= 400:
                     self.log.warning(f"Webhook returned HTTP {resp.status}")
