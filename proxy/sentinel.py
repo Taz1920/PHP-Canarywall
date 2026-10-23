@@ -187,15 +187,13 @@ class SentinelProxy:
     def _check_auth(self, request: web.Request) -> bool:
         key = request.headers.get("X-Sentinel-Key", "")
         if not key:
-            key = request.query.get("key", "")
-        if not key:
             return False
         return hmac.compare_digest(key, self.cfg.admin_key)
 
     @staticmethod
     def _unauthorized() -> web.Response:
         return web.json_response(
-            {"error": "Unauthorized. Provide SENTINEL_ADMIN_KEY via X-Sentinel-Key header or ?key= query param."},
+            {"error": "Unauthorized. Provide SENTINEL_ADMIN_KEY via X-Sentinel-Key header."},
             status=401,
         )
 

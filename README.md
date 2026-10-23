@@ -1,8 +1,11 @@
 # PHP Sentinel
 
-A reverse proxy that protects PHP applications from parser-level exploits by replaying every HTTP request through an array of isolated canary PHP-FPM instances. If any canary crashes, the request is blocked before production ever sees it.
+A reverse proxy that defends PHP applications against CVE-2026-109618, CVE-2026-109619, and the broader class of PHP SAPI parsing exploits. Two layers of protection:
 
-Built to defend against CVE-2026-109619 (use-after-free in session upload progress) and the entire class of PHP SAPI parsing vulnerabilities — known and unknown.
+1. **Upload-progress filter** (primary) — blocks any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`, the root attack surface for both CVEs. Deterministic, zero false negatives, zero latency cost.
+2. **Canary array** (defense in depth) — replays every request through 11 isolated PHP-FPM instances (PHP 5.6–8.4) in parallel. If any canary worker crashes, OOMs, or hangs, the request is blocked before production sees it. Catches unknown parser bugs that the filter doesn't cover.
+
+**Designed as a compensating control for EOL PHP versions (5.6, 7.x, 8.0, 8.1) where no vendor patch exists.**
 
 ## How It Works
 
@@ -15,6 +18,10 @@ Built to defend against CVE-2026-109619 (use-after-free in session upload progre
                        │    Proxy      │   (Python / aiohttp)
                        └───────┬───────┘
                                │
+              ┌── Upload-progress field? ── YES → Block (403)
+              │
+              NO
+              │
               Fan out to ALL canaries in parallel
               ┌────────┬───────┼───────┬────────┐
               ▼        ▼       ▼       ▼        ▼
@@ -37,6 +44,13 @@ Built to defend against CVE-2026-109619 (use-after-free in session upload progre
 
 Every canary runs in isolation: no database, no secrets, no network egress. Its only job is to parse the request through PHP's SAPI code paths. An exploit that targets PHP 7.4's parser but not 8.4's still gets caught, and vice versa.
 
+### Limitations
+
+- The canary array detects exploits that **crash** PHP workers. A successful RCE that runs without crashing is not caught by the canaries — the upload-progress filter is the primary defense against CVE-2026-109619's use-after-free.
+- Canaries run `memory_limit=16M`, not production's config. OOM thresholds can differ. The canaries are a safety net, not a guarantee.
+- CVE-2026-109619 corrupts worker state across multiple requests. Single-request canary replay does not reproduce multi-request heap grooming. The upload-progress filter covers this gap.
+- Adds ~50ms latency per request (parallel canary replay). The upload-progress filter adds none.
+
 ## Security Note
 
 By default, requests larger than 32MB bypass the canary array and go straight to production. This is safe because PHP parser exploits (use-after-free, boundary parsing crashes, session upload progress bugs) all trigger during header and multipart structure parsing in the first few KB of a request — not deep into the body. PHP parses multipart structure as it reads, so the vulnerable code paths fire on the boundaries and headers at the top, long before 32MB.
@@ -47,7 +61,7 @@ If you want to eliminate this bypass entirely, set `SENTINEL_MAX_REPLAY_BODY=0` 
 
 - **Multi-version canary array** — ships with 11 PHP versions (5.6 through 8.4), all running in parallel
 - **Admin API + built-in dashboard** — enable/disable canaries at runtime, view health and attack metrics at `/__sentinel/dashboard`
-- **Zero false negatives** — the canary fails on exactly the same inputs as production
+- **Defense in depth** — deterministic upload-progress filter plus canary crash detection for unknown parser bugs
 - **Block logging** — every blocked request is logged with full headers and body preview (JSONL)
 - **Per-canary metrics** — errors, timeouts, and crashes tracked per PHP version
 
@@ -129,14 +143,10 @@ SENTINEL_ADMIN_KEY=your-secret-key-here
 docker logs php-sentinel 2>&1 | grep ADMIN_KEY
 ```
 
-The dashboard at `/__sentinel/dashboard` will prompt you for the key on first visit. For API calls, pass the key via header or query parameter:
+The dashboard at `/__sentinel/dashboard` will prompt you for the key on first visit. For API calls, pass the key via header:
 
 ```bash
-# Header (recommended)
 curl -H "X-Sentinel-Key: your-key" http://localhost:8080/__sentinel/admin/canaries
-
-# Query parameter
-curl http://localhost:8080/__sentinel/metrics?key=your-key
 ```
 
 The health endpoint (`/__sentinel/health`) remains public for load balancer health checks.
