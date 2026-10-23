@@ -13,7 +13,11 @@
 // Health check
 if ($_SERVER['REQUEST_URI'] === '/__canary/health') {
     header('Content-Type: application/json');
-    echo json_encode(['status' => 'ok', 'pid' => getmypid()]);
+    echo json_encode([
+        'status' => 'ok',
+        'pid' => getmypid(),
+        'upload_progress_name' => ini_get('session.upload_progress.name'),
+    ]);
     exit(0);
 }
 

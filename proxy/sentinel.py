@@ -574,6 +574,20 @@ class SentinelProxy:
             self.log.warning(f"Webhook failed: {type(exc).__name__}: {exc}")
 
 
+async def _detect_upload_progress_name(proxy: "SentinelProxy", logger: logging.Logger) -> str:
+    for url in proxy.cfg.canary_urls:
+        try:
+            async with proxy._canary_session.get(f"{url}/__canary/health") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    name = data.get("upload_progress_name")
+                    if name:
+                        return name
+        except Exception:
+            continue
+    return ""
+
+
 # ── Application entry point ──────────────────────────────────────────
 
 async def run():
@@ -582,6 +596,14 @@ async def run():
 
     proxy = SentinelProxy(cfg, logger)
     await proxy.start()
+
+    if cfg.block_upload_progress and not os.getenv("SENTINEL_UPLOAD_PROGRESS_NAME"):
+        detected = await _detect_upload_progress_name(proxy, logger)
+        if detected and detected != cfg.upload_progress_name:
+            cfg.upload_progress_name = detected
+            logger.info(f"Auto-detected session.upload_progress.name from canary: {detected}")
+        elif detected:
+            logger.info(f"Upload-progress filter targeting: {detected}")
 
     logger.info(
         f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
