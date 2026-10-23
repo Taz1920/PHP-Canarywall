@@ -48,7 +48,7 @@ Every canary runs in isolation: no database, no secrets, no network egress. Its 
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/php-sentinel.git
+git clone https://github.com/Taz1920/php-sentinel.git
 cd php-sentinel
 
 # Build all canary images (first run takes a few minutes)
@@ -158,25 +158,75 @@ The kill test exercises:
 - Concurrent worker kills (4x 15MB simultaneous)
 - Session upload progress spam (20x 17MB multipart)
 
+## Connecting to Your App
+
+PHP Sentinel sits between the internet and your PHP application. You have two options:
+
+### Option 1: Point Sentinel at your existing server
+
+Edit `docker-compose.yml` and change the `SENTINEL_BACKEND_URL` to your app's address:
+
+```yaml
+environment:
+  SENTINEL_BACKEND_URL: "http://your-php-server:80"  # your real app
+```
+
+Then remove or ignore the `backend` service — you don't need it. Start the stack and route traffic through port 8080 instead of directly to your app.
+
+### Option 2: Run your app inside the Compose stack
+
+Replace the `backend` service in `docker-compose.yml` with your own PHP container:
+
+```yaml
+backend:
+  image: your-app-image:latest
+  # or build: ./your-app
+  expose:
+    - "80"
+  networks:
+    - sentinel-net
+```
+
+### Putting it in front of a live site
+
+1. Deploy the Sentinel stack on the same server (or a server that can reach your app)
+2. Point your load balancer / reverse proxy / DNS at Sentinel's port (8080) instead of directly at your PHP app
+3. Sentinel forwards clean traffic to your app automatically
+
+```
+Internet → Load Balancer → Sentinel (:8080) → Your PHP App (:80)
+```
+
+Works with any PHP application: WordPress, Laravel, Drupal, CodeIgniter, custom apps — anything served by PHP over HTTP.
+
 ## Deployment
 
 ### Docker Compose (included)
 
-The default `docker-compose.yml` runs all 11 canaries plus the proxy. Replace the `backend` service with your production app or point `SENTINEL_BACKEND_URL` at your existing infrastructure.
-
-### Standalone
+The default `docker-compose.yml` runs all 11 canaries plus the proxy.
 
 ```bash
-# Run a single canary
+docker compose build   # build canary images
+docker compose up -d   # start everything
+```
+
+### Standalone (no Compose)
+
+```bash
+# Build and run a single canary
 docker build -t canary --build-arg PHP_IMAGE=php:8.1-fpm ./canary
 docker run -d --name canary -p 9080:9080 canary
 
-# Run the proxy
+# Run the proxy (Python 3.8+)
 pip install aiohttp
 SENTINEL_CANARY_URLS=http://localhost:9080 \
 SENTINEL_BACKEND_URL=http://your-app:80 \
 python proxy/sentinel.py
 ```
+
+### Cloud / VPS
+
+Same Docker Compose stack — just set `SENTINEL_BACKEND_URL` to your app's internal address. Works on any host that runs Docker: EC2, DigitalOcean, Linode, Vultr, Hetzner, etc.
 
 ### Kubernetes
 
