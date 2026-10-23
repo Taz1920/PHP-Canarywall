@@ -299,9 +299,6 @@ class SentinelProxy:
                 codes = [int(c) for c in data["canary_fail_codes"]]
                 self.cfg.canary_fail_codes = codes
                 changed.append(f"canary_fail_codes={codes}")
-            if "backend_url" in data:
-                self.cfg.backend_url = str(data["backend_url"]).rstrip("/")
-                changed.append(f"backend_url={self.cfg.backend_url}")
             self.log.info(f"ADMIN: Config updated — {', '.join(changed)}")
             return self._cors(web.json_response({"ok": True, "changed": changed}))
 
@@ -417,8 +414,8 @@ class SentinelProxy:
             ))
 
         if not tasks:
-            self.log.warning(f"ALL canaries disabled — bypassing {client_ip} {request.method} {request.path_qs}")
-            return []
+            self.log.warning(f"ALL canaries disabled — blocking {client_ip} {request.method} {request.path_qs}")
+            return ["all_canaries_disabled"]
 
         results = await asyncio.gather(*tasks)
         return [name for name, ok in results if not ok]
@@ -532,6 +529,11 @@ class SentinelProxy:
         client_ip: str,
         failed_canaries: list[str],
     ):
+        redact = {"cookie", "authorization", "proxy-authorization", "x-sentinel-key"}
+        safe_headers = {
+            k: ("[REDACTED]" if k.lower() in redact else v)
+            for k, v in request.headers.items()
+        }
         entry = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "client_ip": client_ip,
@@ -540,8 +542,7 @@ class SentinelProxy:
             "content_type": request.content_type or "",
             "content_length": len(body),
             "killed_canaries": failed_canaries,
-            "headers": dict(request.headers),
-            "body_preview": body[:2048].decode("latin-1"),
+            "headers": safe_headers,
         }
         if self.cfg.block_log:
             try:

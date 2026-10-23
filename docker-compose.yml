@@ -16,7 +16,7 @@ x-canary-base: &canary-base
     - ./canary/nginx.conf:/etc/nginx/nginx.conf:ro
   restart: unless-stopped
   networks:
-    - sentinel-net
+    - canary-net
 
 services:
   sentinel:
@@ -31,7 +31,7 @@ services:
       SENTINEL_PORT: "8080"
       SENTINEL_CANARY_TIMEOUT: "5"
       SENTINEL_MAX_REPLAY_BODY: "33554432"
-      SENTINEL_VERBOSE: "true"
+      SENTINEL_VERBOSE: "false"
       SENTINEL_BLOCK_LOG: "/var/log/sentinel/blocked.jsonl"
       SENTINEL_BLOCK_UPLOAD_PROGRESS: "${SENTINEL_BLOCK_UPLOAD_PROGRESS:-true}"
       SENTINEL_WEBHOOK_URL: "${SENTINEL_WEBHOOK_URL:-}"
@@ -66,6 +66,7 @@ services:
     restart: unless-stopped
     networks:
       - sentinel-net
+      - canary-net
 
   canary-84: { <<: *canary-base, image: "php-sentinel-canary-84:latest", container_name: sentinel-canary-84, deploy: { resources: { limits: { memory: 256M, cpus: "0.5" } } } }
   canary-83: { <<: *canary-base, image: "php-sentinel-canary-83:latest", container_name: sentinel-canary-83, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
@@ -96,3 +97,6 @@ volumes:
 networks:
   sentinel-net:
     driver: bridge
+  canary-net:
+    driver: bridge
+    internal: true

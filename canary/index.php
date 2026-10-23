@@ -18,20 +18,19 @@ if ($_SERVER['REQUEST_URI'] === '/__canary/health') {
 }
 
 // Test mode — simulate failure scenarios with X-Sentinel-Test header.
-// Remove this block in production.
-$test_mode = isset($_SERVER['HTTP_X_SENTINEL_TEST']) ? $_SERVER['HTTP_X_SENTINEL_TEST'] : '';
-if ($test_mode === 'crash') {
-    // Kill the worker hard — SIGKILL can't be caught, FPM worker dies, nginx returns 502
-    posix_kill(getmypid(), 9);
-    exit(1);
-} elseif ($test_mode === 'timeout') {
-    // Simulate a hung worker — exceeds request_terminate_timeout (3s)
-    sleep(10);
-    exit(1);
-} elseif ($test_mode === 'oom') {
-    // Simulate OOM — allocate until the worker is killed
-    $leak = [];
-    while (true) { $leak[] = str_repeat('X', 1024 * 1024); }
+// Only active when SENTINEL_TEST_MODE=1 env var is set (off by default).
+if (getenv('SENTINEL_TEST_MODE') === '1') {
+    $test_mode = isset($_SERVER['HTTP_X_SENTINEL_TEST']) ? $_SERVER['HTTP_X_SENTINEL_TEST'] : '';
+    if ($test_mode === 'crash') {
+        posix_kill(getmypid(), 9);
+        exit(1);
+    } elseif ($test_mode === 'timeout') {
+        sleep(10);
+        exit(1);
+    } elseif ($test_mode === 'oom') {
+        $leak = [];
+        while (true) { $leak[] = str_repeat('X', 1024 * 1024); }
+    }
 }
 
 // Force PHP to fully populate all request superglobals.
