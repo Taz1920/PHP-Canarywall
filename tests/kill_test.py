@@ -109,7 +109,7 @@ async def main():
                        "Cookie": f"PHPSESSID={sid}; PHP_SESSION_UPLOAD_PROGRESS=1",
                    },
                    body=body,
-                   expect_block=False)  # PHP survives this — it's not actually vuln
+                   expect_block=True)  # Blocked by upload_progress filter before canaries
 
         # 2. Massive body — try to OOM canary workers via php://input read
         #    Canary reads file_get_contents('php://input'). memory_limit=16M.

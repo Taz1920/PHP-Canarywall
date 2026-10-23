@@ -3,6 +3,8 @@
 x-canary-base: &canary-base
   expose:
     - "9080"
+  environment:
+    SENTINEL_TEST_MODE: "${SENTINEL_TEST_MODE:-0}"
   healthcheck:
     test: ["CMD", "curl", "-sf", "http://localhost:9080/__canary/health"]
     interval: 15s
