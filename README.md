@@ -113,6 +113,7 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay (32MB). Larger requests bypass canaries. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
 | `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`. This is the attack surface for CVE-2026-109618/109619. Set to `false` only if your app uses PHP's session upload progress feature. |
+| `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
 | `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |
 
@@ -139,6 +140,41 @@ curl http://localhost:8080/__sentinel/metrics?key=your-key
 ```
 
 The health endpoint (`/__sentinel/health`) remains public for load balancer health checks.
+
+## Webhook / SIEM Integration
+
+Send block alerts to any HTTP endpoint — CrowdStrike, Splunk, Elastic, Datadog, Slack, or any webhook receiver:
+
+```bash
+# Set in docker-compose.yml or .env
+SENTINEL_WEBHOOK_URL=https://your-siem.example.com/api/events
+
+# Splunk HEC example
+SENTINEL_WEBHOOK_URL=https://splunk.example.com:8088/services/collector/event
+
+# Slack incoming webhook
+SENTINEL_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../xxx
+```
+
+Every blocked request POSTs a JSON payload:
+
+```json
+{
+  "event": "request_blocked",
+  "source": "php-sentinel",
+  "ts": "2026-10-22T15:30:00+0000",
+  "client_ip": "203.0.113.42",
+  "method": "POST",
+  "path": "/index.php",
+  "content_type": "multipart/form-data",
+  "content_length": 15728640,
+  "killed_canaries": ["canary-81", "canary-74"],
+  "headers": { "..." },
+  "body_preview": "..."
+}
+```
+
+Webhooks fire asynchronously and never block request handling. Failed deliveries are logged but don't affect proxy operation.
 
 ## Admin API
 

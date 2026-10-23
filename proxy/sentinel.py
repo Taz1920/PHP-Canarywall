@@ -45,6 +45,7 @@ class SentinelConfig:
     verbose: bool = False
     admin_key: str = ""
     block_upload_progress: bool = True
+    webhook_url: str = ""
 
     @classmethod
     def from_env(cls) -> "SentinelConfig":
@@ -66,6 +67,7 @@ class SentinelConfig:
         cfg.block_upload_progress = os.getenv(
             "SENTINEL_BLOCK_UPLOAD_PROGRESS", "true"
         ).lower() not in ("0", "false", "no", "off")
+        cfg.webhook_url = os.getenv("SENTINEL_WEBHOOK_URL", "")
         cfg.admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
         if not cfg.admin_key:
             cfg.admin_key = secrets.token_urlsafe(32)
@@ -532,24 +534,38 @@ class SentinelProxy:
         client_ip: str,
         failed_canaries: list[str],
     ):
-        if not self.cfg.block_log:
-            return
+        entry = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "client_ip": client_ip,
+            "method": request.method,
+            "path": request.path_qs,
+            "content_type": request.content_type or "",
+            "content_length": len(body),
+            "killed_canaries": failed_canaries,
+            "headers": dict(request.headers),
+            "body_preview": body[:2048].decode("latin-1"),
+        }
+        if self.cfg.block_log:
+            try:
+                with open(self.cfg.block_log, "a") as f:
+                    f.write(json.dumps(entry) + "\n")
+            except Exception as exc:
+                self.log.error(f"Failed to write block log: {exc}")
+        if self.cfg.webhook_url:
+            asyncio.ensure_future(self._send_webhook(entry))
+
+    async def _send_webhook(self, entry: dict):
         try:
-            entry = {
-                "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "client_ip": client_ip,
-                "method": request.method,
-                "path": request.path_qs,
-                "content_type": request.content_type or "",
-                "content_length": len(body),
-                "killed_canaries": failed_canaries,
-                "headers": dict(request.headers),
-                "body_preview": body[:2048].decode("latin-1"),
-            }
-            with open(self.cfg.block_log, "a") as f:
-                f.write(json.dumps(entry) + "\n")
+            async with self._backend_session.post(
+                self.cfg.webhook_url,
+                json={"event": "request_blocked", "source": "php-sentinel", **entry},
+                timeout=aiohttp.ClientTimeout(total=5),
+                ssl=False,
+            ) as resp:
+                if resp.status >= 400:
+                    self.log.warning(f"Webhook returned HTTP {resp.status}")
         except Exception as exc:
-            self.log.error(f"Failed to write block log: {exc}")
+            self.log.warning(f"Webhook failed: {type(exc).__name__}: {exc}")
 
 
 # ── Application entry point ──────────────────────────────────────────
