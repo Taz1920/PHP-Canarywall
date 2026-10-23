@@ -58,10 +58,10 @@ $cookies = $_COOKIE;
 // 4. Raw input (php://input)
 $raw = file_get_contents('php://input');
 
-// 5. Session upload progress (CVE-2026-109618 attack surface)
+// 5. Session upload progress (CVE-2026-109618/109619 attack surface)
 //    If the request includes a PHP_SESSION_UPLOAD_PROGRESS cookie and
 //    a matching POST field, PHP's session upload progress handler fires
-//    during multipart parsing.
+//    during multipart parsing — both CVEs are triggered through this path.
 if (isset($_COOKIE[ini_get('session.upload_progress.name')])) {
     session_start();
     $progress = isset($_SESSION) ? $_SESSION : [];
