@@ -311,6 +311,74 @@ SENTINEL_BACKEND_URL=http://your-app:80 \
 python proxy/sentinel.py
 ```
 
+### Bare Metal (No Docker)
+
+If you know your exact PHP version and don't want Docker at all, you can run the proxy and a single canary natively.
+
+**Requirements:** Python 3.8+, PHP-FPM (matching your production version), nginx or any FastCGI-capable web server.
+
+**1. Set up the canary PHP-FPM pool**
+
+Copy the canary files to a directory on the host:
+
+```bash
+mkdir -p /opt/sentinel/canary /tmp/php-sessions
+cp canary/index.php /opt/sentinel/canary/
+cp canary/php.ini /etc/php/sentinel-canary.ini    # adjust path for your distro
+cp canary/fpm.conf /etc/php-fpm.d/canary.conf     # adjust path for your distro
+```
+
+Edit `canary.conf` — change the listen address to a local port:
+
+```ini
+[canary]
+listen = 127.0.0.1:9000
+pm = static
+pm.max_children = 4
+```
+
+Start PHP-FPM with the canary pool (exact command depends on your distro):
+
+```bash
+php-fpm -y /etc/php-fpm.d/canary.conf -c /etc/php/sentinel-canary.ini
+```
+
+**2. Set up nginx to front the canary**
+
+```nginx
+server {
+    listen 127.0.0.1:9080;
+    root /opt/sentinel/canary;
+
+    location / {
+        fastcgi_pass 127.0.0.1:9000;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /opt/sentinel/canary/index.php;
+    }
+}
+```
+
+Reload nginx. Verify the canary responds:
+
+```bash
+curl http://127.0.0.1:9080/__canary/health
+# {"status":"ok","pid":1234,"upload_progress_name":"PHP_SESSION_UPLOAD_PROGRESS"}
+```
+
+**3. Run the proxy**
+
+```bash
+pip install aiohttp
+SENTINEL_CANARY_URLS=http://127.0.0.1:9080 \
+SENTINEL_BACKEND_URL=http://your-php-app:80 \
+SENTINEL_ADMIN_KEY=your-secret-key \
+python proxy/sentinel.py
+```
+
+The proxy auto-detects `session.upload_progress.name` from the canary at startup. Route traffic to port 8080 instead of directly to your app.
+
+**Note:** A single canary matching your production PHP version is sufficient — the multi-version array is for environments where the PHP version is unknown or mixed.
+
 ### Cloud / VPS
 
 Same Docker Compose stack — just set `SENTINEL_BACKEND_URL` to your app's internal address. Works on any host that runs Docker: EC2, DigitalOcean, Linode, Vultr, Hetzner, etc.
