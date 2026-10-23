@@ -101,7 +101,9 @@ All 11 canaries reported identical error counts (24 errors each, 264 total = 24 
 
 ## Public PoC Exploit Results
 
-Tested against four independent public PoC exploit tools:
+Tested against four independent public PoC exploit tools. Two test configurations: with the upload-progress filter enabled (default), and with the filter disabled to verify canary-only detection.
+
+### With upload-progress filter ON (default)
 
 | PoC | Attack Type | Result |
 |-----|-------------|--------|
@@ -110,6 +112,40 @@ Tested against four independent public PoC exploit tools:
 | ikow/php2shell-poc | 4-tier scanner + active OOM probe | Blocked |
 | ikow/php2shell-poc | OOM header bomb (5000 headers) | Blocked (403) |
 | ikow/php2shell-poc | Session filename injection | Blocked (upload-progress filter) |
+
+### With upload-progress filter OFF (canary-only detection)
+
+Upload-progress filter disabled to verify the canary array catches real exploit payloads independently.
+
+| PoC | Attack Type | Canary Result | Outcome |
+|-----|-------------|---------------|---------|
+| eness/php2shell-PoC | 3-stage heap exploit (stage 1 heap leak) | **502 across all 11 canaries** — FPM workers crashed | Blocked. Exploit failed at stage 1: Sentinel returned 403 instead of leaked heap addresses. |
+| eness/php2shell-PoC | Stage 1 repeated attempts (3 rounds) | **502 on every attempt, all versions** | Blocked. Every stage 1 payload killed every canary. HEAP_LEAK_FAILED. |
+| ikow/php2shell-poc | OOM header bomb (5000 headers x 500 bytes) | **502 on canary-81, canary-80, canary-74, canary-73** | Blocked (403). |
+| ikow/php2shell-poc | Session LFI chain (chain_a) | Session plant: 200 (clean request). LFI read: 404 (no LFI path). | Not blocked — session plant is a clean request. Exploit failed (no LFI endpoint). |
+| ikow/php2shell-poc | Handler mismatch RCE (chain_c) | Pollution: 200. Gadget injection: 200. Trigger: 404. | Not blocked — requests are individually clean. Exploit failed (no matching endpoints). |
+| murrez/php2shell | UAF fingerprint + exploit | Fingerprint: 200 (identified PHP 8.1.34). Exploit: WEAK-SIGNAL. | Not blocked — fingerprint is a clean request. Exploit could not confirm UAF. |
+
+**Key finding:** The eness PoC's stage 1 heap leak payloads caused **real PHP-FPM worker crashes (HTTP 502)** across all 11 canary versions. These are actual parser-level crashes from real CVE exploit payloads, not simulated failures. The canary array detected and blocked them without the upload-progress filter.
+
+**Post-test verification:** Backend container inspected after all exploit runs. No `rce_proof.txt`, no injected code, no compromised processes. Empty session files (0 bytes) from exploit session rotation were cleaned up. All canaries clean — no session files or artifacts.
+
+```
+Proxy log excerpt (eness exploit, filter OFF):
+
+CANARY FAIL [canary-84] status=502 POST /
+CANARY FAIL [canary-83] status=502 POST /
+CANARY FAIL [canary-82] status=502 POST /
+CANARY FAIL [canary-81] status=502 POST /
+CANARY FAIL [canary-80] status=502 POST /
+CANARY FAIL [canary-74] status=502 POST /
+CANARY FAIL [canary-73] status=502 POST /
+CANARY FAIL [canary-72] status=502 POST /
+CANARY FAIL [canary-71] status=502 POST /
+CANARY FAIL [canary-70] status=502 POST /
+CANARY FAIL [canary-56] status=502 POST /
+BLOCKED POST / — killed: [canary-84, ..., canary-56]
+```
 
 ## What These Tests Cover
 
