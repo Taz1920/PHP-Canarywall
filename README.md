@@ -131,7 +131,8 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay through canaries (32MB). Larger requests bypass canaries and go straight to the backend. |
 | `SENTINEL_MAX_BODY_SIZE` | `104857600` | Max body size the proxy accepts (100MB). Requests exceeding this get HTTP 413. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
-| `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`. This is the shared attack surface for CVE-2026-109618 and CVE-2026-109619. Set to `false` only if your app uses PHP's session upload progress feature. |
+| `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing the session upload progress field name. This is the shared attack surface for CVE-2026-109618 and CVE-2026-109619. Set to `false` only if your app uses PHP's session upload progress feature. |
+| `SENTINEL_UPLOAD_PROGRESS_NAME` | `PHP_SESSION_UPLOAD_PROGRESS` | The field name to match in multipart bodies. Must match your target's `session.upload_progress.name` PHP setting. Only change this if the target uses a custom value. |
 | `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
 | `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |

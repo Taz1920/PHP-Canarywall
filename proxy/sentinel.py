@@ -46,6 +46,7 @@ class SentinelConfig:
     verbose: bool = False
     admin_key: str = ""
     block_upload_progress: bool = True
+    upload_progress_name: str = "PHP_SESSION_UPLOAD_PROGRESS"
     webhook_url: str = ""
 
     @classmethod
@@ -69,6 +70,9 @@ class SentinelConfig:
         cfg.block_upload_progress = os.getenv(
             "SENTINEL_BLOCK_UPLOAD_PROGRESS", "true"
         ).lower() not in ("0", "false", "no", "off")
+        cfg.upload_progress_name = os.getenv(
+            "SENTINEL_UPLOAD_PROGRESS_NAME", cfg.upload_progress_name
+        )
         cfg.webhook_url = os.getenv("SENTINEL_WEBHOOK_URL", "")
         cfg.admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
         if not cfg.admin_key:
@@ -345,13 +349,13 @@ class SentinelProxy:
 
         body = await request.read()
 
-        if self.cfg.block_upload_progress and b"PHP_SESSION_UPLOAD_PROGRESS" in body:
+        if self.cfg.block_upload_progress and self.cfg.upload_progress_name.encode() in body:
             ct = (request.content_type or "").lower()
             if "multipart" in ct:
                 self.metrics.blocked += 1
                 self.log.warning(
                     f"BLOCKED {client_ip} {request.method} {path} — "
-                    f"PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)"
+                    f"{self.cfg.upload_progress_name} in multipart body (CVE-2026-109618/109619 vector)"
                 )
                 await self._log_blocked(request, body, client_ip, ["upload_progress_blocked"])
                 return web.Response(

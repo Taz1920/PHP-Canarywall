@@ -178,7 +178,7 @@ BLOCKED POST /index.php — killed: [canary-84, ..., canary-56]
 - CVE-2026-109619 cross-request state corruption without `PHP_SESSION_UPLOAD_PROGRESS` (no known exploit achieves this — the cozybear PoC, the only working 109619 RCE, requires upload progress in every request)
 - False positive rate under production traffic patterns
 - Latency under sustained production load
-- Custom `session.upload_progress.name` bypass of the filter
+- Custom `session.upload_progress.name` values (now configurable via `SENTINEL_UPLOAD_PROGRESS_NAME` env var)
 
 ## Running the Tests
 
