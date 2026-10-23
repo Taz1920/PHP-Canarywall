@@ -1,0 +1,194 @@
+# PHP Sentinel
+
+A reverse proxy that protects PHP applications from parser-level exploits by replaying every HTTP request through an array of isolated canary PHP-FPM instances. If any canary crashes, the request is blocked before production ever sees it.
+
+Built to defend against CVE-2026-109619 (use-after-free in session upload progress) and the entire class of PHP SAPI parsing vulnerabilities — known and unknown.
+
+## How It Works
+
+```
+                          Client Request
+                               │
+                               ▼
+                       ┌───────────────┐
+                       │   Sentinel    │   Port 8080
+                       │    Proxy      │   (Python / aiohttp)
+                       └───────┬───────┘
+                               │
+              Fan out to ALL canaries in parallel
+              ┌────────┬───────┼───────┬────────┐
+              ▼        ▼       ▼       ▼        ▼
+          ┌───────┐┌───────┐┌─────┐┌───────┐┌───────┐
+          │PHP 8.4││PHP 8.3││ ... ││PHP 7.0││PHP 5.6│
+          │Canary ││Canary ││     ││Canary ││Canary │
+          └───┬───┘└───┬───┘└──┬──┘└───┬───┘└───┬───┘
+              │        │       │       │        │
+              └────────┴───────┼───────┴────────┘
+                               │
+                  ALL survived? ─► YES → Forward to production
+                               └─► ANY died → Block (403)
+                               │
+                               ▼
+                       ┌───────────────┐
+                       │  Production   │
+                       │   Backend     │
+                       └───────────────┘
+```
+
+Every canary runs in isolation: no database, no secrets, no network egress. Its only job is to parse the request through PHP's SAPI code paths. An exploit that targets PHP 7.4's parser but not 8.4's still gets caught, and vice versa.
+
+## Features
+
+- **Multi-version canary array** — ships with 11 PHP versions (5.6 through 8.4), all running in parallel
+- **Admin API + dashboard** — enable/disable canaries at runtime, view health and attack metrics
+- **Zero false negatives** — the canary fails on exactly the same inputs as production
+- **Block logging** — every blocked request is logged with full headers and body preview (JSONL)
+- **Per-canary metrics** — errors, timeouts, and crashes tracked per PHP version
+
+## Quick Start
+
+```bash
+git clone https://github.com/yourusername/php-sentinel.git
+cd php-sentinel
+
+# Build all canary images (first run takes a few minutes)
+docker compose build
+
+# Start the full stack
+docker compose up -d
+
+# Verify — clean request passes through
+curl http://localhost:8080/
+
+# Health check
+curl http://localhost:8080/__sentinel/health
+
+# Admin API — list all canaries
+curl http://localhost:8080/__sentinel/admin/canaries
+```
+
+### Building Individual Canary Images
+
+If you only need specific PHP versions:
+
+```bash
+# Build a single version
+docker build -t php-sentinel-canary-74:latest \
+  --build-arg PHP_IMAGE=php:7.4-fpm ./canary
+
+# Build all 11 versions
+for ver in 84 83 82 81 80 74 73 72 71 70 56; do
+  case $ver in
+    84) img=php:8.4-fpm ;; 83) img=php:8.3-fpm ;;
+    82) img=php:8.2-fpm ;; 81) img=php:8.1-fpm ;;
+    80) img=php:8.0-fpm ;; 74) img=php:7.4-fpm ;;
+    73) img=php:7.3-fpm ;; 72) img=php:7.2-fpm ;;
+    71) img=php:7.1-fpm ;; 70) img=php:7.0-fpm ;;
+    56) img=php:5.6-fpm ;;
+  esac
+  docker build -t php-sentinel-canary-$ver:latest \
+    --build-arg PHP_IMAGE=$img ./canary
+done
+```
+
+## Configuration
+
+All settings are environment variables on the `sentinel` container:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SENTINEL_CANARY_URLS` | `http://canary:9080` | Comma-separated canary URLs |
+| `SENTINEL_BACKEND_URL` | `http://backend:80` | Production backend URL |
+| `SENTINEL_PORT` | `8080` | Proxy listen port |
+| `SENTINEL_CANARY_TIMEOUT` | `5` | Seconds to wait for canary response |
+| `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay (32MB). Larger requests bypass canaries. |
+| `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
+| `SENTINEL_VERBOSE` | `false` | Log every request |
+
+## Admin API
+
+Manage canaries at runtime without restarting the stack.
+
+```bash
+# List all canaries with health and metrics
+curl http://localhost:8080/__sentinel/admin/canaries
+
+# Disable a canary
+curl -X POST http://localhost:8080/__sentinel/admin/canaries/canary-56/disable
+
+# Enable a canary
+curl -X POST http://localhost:8080/__sentinel/admin/canaries/canary-56/enable
+
+# Bulk update — enable only EOL versions
+curl -X POST http://localhost:8080/__sentinel/admin/canaries/bulk \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": ["canary-81","canary-80","canary-74","canary-73","canary-72","canary-71","canary-70","canary-56"]}'
+
+# Metrics
+curl http://localhost:8080/__sentinel/metrics
+```
+
+## Detection Signals
+
+| Canary Response | Meaning | Proxy Action |
+|---|---|---|
+| 200 | Request parsed cleanly | Forward to backend |
+| 500 | PHP fatal error (OOM, etc.) | **Block** |
+| 502 | FPM worker segfaulted | **Block** |
+| 503 | FPM pool exhausted | **Block** |
+| 504 / timeout | Worker hung | **Block** |
+| Connection reset | Worker died mid-response | **Block** |
+
+## Testing
+
+Two test suites are included:
+
+```bash
+# Kill test — targeted attacks that actually crash canary workers
+pip install aiohttp
+python tests/kill_test.py
+
+# Stress test — 17 payload types + sustained flood
+python tests/stress_test.py --flood-duration 10
+```
+
+The kill test exercises:
+- SIGKILL / timeout / OOM via test headers
+- 20MB body OOM attacks via `php://input`
+- Concurrent worker kills (4x 15MB simultaneous)
+- Session upload progress spam (20x 17MB multipart)
+
+## Deployment
+
+### Docker Compose (included)
+
+The default `docker-compose.yml` runs all 11 canaries plus the proxy. Replace the `backend` service with your production app or point `SENTINEL_BACKEND_URL` at your existing infrastructure.
+
+### Standalone
+
+```bash
+# Run a single canary
+docker build -t canary --build-arg PHP_IMAGE=php:8.1-fpm ./canary
+docker run -d --name canary -p 9080:9080 canary
+
+# Run the proxy
+pip install aiohttp
+SENTINEL_CANARY_URLS=http://localhost:9080 \
+SENTINEL_BACKEND_URL=http://your-app:80 \
+python proxy/sentinel.py
+```
+
+### Kubernetes
+
+Deploy each canary as a sidecar or as separate services in the same namespace. Point `SENTINEL_CANARY_URLS` at all of them. The proxy is stateless and horizontally scalable.
+
+## Architecture
+
+- **Canary isolation** — no database, no secrets, dangerous functions disabled, `memory_limit=16M`, `pm.max_children=4`
+- **Bind-mounted configs** — `index.php`, `php.ini`, `fpm.conf`, and `nginx.conf` are shared across all canary versions via volume mounts
+- **Archived repo support** — the Dockerfile automatically handles EOL Debian distributions (jessie, stretch, buster, bullseye) whose apt repos have moved to `archive.debian.org`
+- **PHP 5.6 compatibility** — the canary PHP script uses `isset()` ternary instead of `??` for compatibility back to 5.6
+
+## License
+
+MIT

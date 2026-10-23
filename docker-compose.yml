@@ -1,0 +1,94 @@
+# PHP Sentinel — Full Canary Array (PHP 5.6 through 8.4)
+
+x-canary-base: &canary-base
+  expose:
+    - "9080"
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:9080/__canary/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+  volumes:
+    - ./canary/index.php:/var/www/canary/index.php:ro
+    - ./canary/php.ini:/usr/local/etc/php/conf.d/sentinel-canary.ini:ro
+    - ./canary/fpm.conf:/usr/local/etc/php-fpm.d/canary.conf:ro
+    - ./canary/nginx.conf:/etc/nginx/nginx.conf:ro
+  restart: unless-stopped
+  networks:
+    - sentinel-net
+
+services:
+  sentinel:
+    image: php-sentinel-sentinel:latest
+    container_name: php-sentinel
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      SENTINEL_CANARY_URLS: "http://canary-84:9080,http://canary-83:9080,http://canary-82:9080,http://canary-81:9080,http://canary-80:9080,http://canary-74:9080,http://canary-73:9080,http://canary-72:9080,http://canary-71:9080,http://canary-70:9080,http://canary-56:9080"
+      SENTINEL_BACKEND_URL: "http://backend:80"
+      SENTINEL_PORT: "8080"
+      SENTINEL_CANARY_TIMEOUT: "5"
+      SENTINEL_MAX_REPLAY_BODY: "33554432"
+      SENTINEL_VERBOSE: "true"
+      SENTINEL_BLOCK_LOG: "/var/log/sentinel/blocked.jsonl"
+    volumes:
+      - sentinel-logs:/var/log/sentinel
+      - ./proxy/sentinel.py:/app/sentinel.py:ro
+    depends_on:
+      canary-84:
+        condition: service_healthy
+      canary-83:
+        condition: service_healthy
+      canary-82:
+        condition: service_healthy
+      canary-81:
+        condition: service_healthy
+      canary-80:
+        condition: service_healthy
+      canary-74:
+        condition: service_healthy
+      canary-73:
+        condition: service_healthy
+      canary-72:
+        condition: service_healthy
+      canary-71:
+        condition: service_healthy
+      canary-70:
+        condition: service_healthy
+      canary-56:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sentinel-net
+
+  canary-84: { <<: *canary-base, image: "php-sentinel-canary-84:latest", container_name: sentinel-canary-84, deploy: { resources: { limits: { memory: 256M, cpus: "0.5" } } } }
+  canary-83: { <<: *canary-base, image: "php-sentinel-canary-83:latest", container_name: sentinel-canary-83, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
+  canary-82: { <<: *canary-base, image: "php-sentinel-canary-82:latest", container_name: sentinel-canary-82, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
+  canary-81: { <<: *canary-base, image: "php-sentinel-canary-81:latest", container_name: sentinel-canary-81, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
+  canary-80: { <<: *canary-base, image: "php-sentinel-canary-80:latest", container_name: sentinel-canary-80, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
+  canary-74: { <<: *canary-base, image: "php-sentinel-canary-74:latest", container_name: sentinel-canary-74, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-73: { <<: *canary-base, image: "php-sentinel-canary-73:latest", container_name: sentinel-canary-73, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-72: { <<: *canary-base, image: "php-sentinel-canary-72:latest", container_name: sentinel-canary-72, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-71: { <<: *canary-base, image: "php-sentinel-canary-71:latest", container_name: sentinel-canary-71, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-70: { <<: *canary-base, image: "php-sentinel-canary-70:latest", container_name: sentinel-canary-70, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-56: { <<: *canary-base, image: "php-sentinel-canary-56:latest", container_name: sentinel-canary-56, deploy: { resources: { limits: { memory: 64M, cpus: "0.5" } } } }
+
+  backend:
+    image: php:8.1-apache
+    container_name: php-backend-example
+    expose:
+      - "80"
+    volumes:
+      - ./example-app:/var/www/html
+    restart: unless-stopped
+    networks:
+      - sentinel-net
+
+volumes:
+  sentinel-logs:
+
+networks:
+  sentinel-net:
+    driver: bridge

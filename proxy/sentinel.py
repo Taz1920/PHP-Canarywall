@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""
+PHP Sentinel — Request Sanitization Proxy (Multi-Canary)
+
+Replays every inbound HTTP request against MULTIPLE canary PHP instances
+running different PHP versions in parallel.  If ANY canary's worker
+segfaults, OOMs, or returns an error, the request is dropped before
+production ever sees it.
+
+Multi-version canary array means broader coverage: an exploit that
+targets PHP 8.2's parser but not 8.4's still gets caught, and vice versa.
+"""
+
+import asyncio
+import logging
+import time
+import os
+import sys
+import signal
+import json
+from dataclasses import dataclass, field
+from typing import Optional
+
+import aiohttp
+from aiohttp import web
+
+# ── Configuration ────────────────────────────────────────────────────
+
+@dataclass
+class SentinelConfig:
+    canary_urls: list = field(default_factory=lambda: ["http://canary:9080"])
+    backend_url: str = "http://backend:80"
+    listen_port: int = 8080
+    listen_host: str = "0.0.0.0"
+    canary_timeout: float = 5.0
+    max_replay_body: int = 32 * 1024 * 1024
+    replay_methods: list = field(default_factory=lambda: [
+        "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
+    ])
+    canary_fail_codes: list = field(default_factory=lambda: [500, 502, 503, 504])
+    log_file: str = ""
+    block_log: str = "/var/log/sentinel/blocked.jsonl"
+    verbose: bool = False
+
+    @classmethod
+    def from_env(cls) -> "SentinelConfig":
+        cfg = cls()
+        urls_str = os.getenv("SENTINEL_CANARY_URLS", "")
+        if urls_str:
+            cfg.canary_urls = [u.strip().rstrip("/") for u in urls_str.split(",") if u.strip()]
+        else:
+            single = os.getenv("SENTINEL_CANARY_URL", "http://canary:9080").rstrip("/")
+            cfg.canary_urls = [single]
+        cfg.backend_url = os.getenv("SENTINEL_BACKEND_URL", cfg.backend_url).rstrip("/")
+        cfg.listen_port = int(os.getenv("SENTINEL_PORT", cfg.listen_port))
+        cfg.listen_host = os.getenv("SENTINEL_HOST", cfg.listen_host)
+        cfg.canary_timeout = float(os.getenv("SENTINEL_CANARY_TIMEOUT", cfg.canary_timeout))
+        cfg.max_replay_body = int(os.getenv("SENTINEL_MAX_REPLAY_BODY", cfg.max_replay_body))
+        cfg.log_file = os.getenv("SENTINEL_LOG_FILE", cfg.log_file)
+        cfg.block_log = os.getenv("SENTINEL_BLOCK_LOG", cfg.block_log)
+        cfg.verbose = os.getenv("SENTINEL_VERBOSE", "").lower() in ("1", "true", "yes")
+        return cfg
+
+
+# ── Logging ──────────────────────────────────────────────────────────
+
+def setup_logging(cfg: SentinelConfig) -> logging.Logger:
+    logger = logging.getLogger("sentinel")
+    logger.setLevel(logging.DEBUG if cfg.verbose else logging.INFO)
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+    if cfg.log_file:
+        fh = logging.FileHandler(cfg.log_file)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    return logger
+
+
+# ── Metrics ──────────────────────────────────────────────────────────
+
+class Metrics:
+    def __init__(self, canary_names: list[str]):
+        self.total_requests = 0
+        self.forwarded = 0
+        self.blocked = 0
+        self.canary_errors = 0
+        self.canary_timeouts = 0
+        self.bypassed = 0
+        self.start_time = time.time()
+        self.per_canary = {name: {"errors": 0, "timeouts": 0, "crashes": 0} for name in canary_names}
+
+    def to_dict(self) -> dict:
+        uptime = time.time() - self.start_time
+        return {
+            "uptime_seconds": round(uptime, 1),
+            "total_requests": self.total_requests,
+            "forwarded": self.forwarded,
+            "blocked": self.blocked,
+            "canary_errors": self.canary_errors,
+            "canary_timeouts": self.canary_timeouts,
+            "bypassed": self.bypassed,
+            "block_rate_pct": round(
+                (self.blocked / self.total_requests * 100)
+                if self.total_requests else 0, 2
+            ),
+            "canaries": self.per_canary,
+        }
+
+
+PHP_VERSION_MAP = {
+    "canary-84": "8.4", "canary-83": "8.3", "canary-82": "8.2",
+    "canary-81": "8.1", "canary-80": "8.0", "canary-74": "7.4",
+    "canary-73": "7.3", "canary-72": "7.2", "canary-71": "7.1",
+    "canary-70": "7.0", "canary-56": "5.6",
+}
+
+EOL_VERSIONS = {"8.1", "8.0", "7.4", "7.3", "7.2", "7.1", "7.0", "5.6"}
+
+
+# ── Proxy Core ───────────────────────────────────────────────────────
+
+class SentinelProxy:
+    def __init__(self, cfg: SentinelConfig, logger: logging.Logger):
+        self.cfg = cfg
+        self.log = logger
+        self.canary_names = [self._canary_label(u) for u in cfg.canary_urls]
+        self.canary_url_map = dict(zip(self.canary_names, cfg.canary_urls))
+        self.disabled_canaries: set[str] = set()
+        self.metrics = Metrics(self.canary_names)
+        self._canary_session: Optional[aiohttp.ClientSession] = None
+        self._backend_session: Optional[aiohttp.ClientSession] = None
+
+    @staticmethod
+    def _canary_label(url: str) -> str:
+        host = url.split("://")[-1].split("/")[0].split(":")[0]
+        return host
+
+    async def start(self):
+        timeout = aiohttp.ClientTimeout(total=self.cfg.canary_timeout)
+        self._canary_session = aiohttp.ClientSession(timeout=timeout)
+        self._backend_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=300)
+        )
+        block_dir = os.path.dirname(self.cfg.block_log)
+        if block_dir:
+            os.makedirs(block_dir, exist_ok=True)
+
+    async def stop(self):
+        if self._canary_session:
+            await self._canary_session.close()
+        if self._backend_session:
+            await self._backend_session.close()
+
+    async def _check_canary_health(self, name: str) -> str:
+        url = self.canary_url_map.get(name)
+        if not url:
+            return "unknown"
+        try:
+            timeout = aiohttp.ClientTimeout(total=3)
+            async with self._canary_session.request(
+                "GET", url + "/__canary/health", timeout=timeout, ssl=False,
+            ) as resp:
+                return "healthy" if resp.status == 200 else "unhealthy"
+        except Exception:
+            return "unreachable"
+
+    @staticmethod
+    def _cors(resp: web.Response) -> web.Response:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return resp
+
+    async def _handle_admin(self, request: web.Request, path: str) -> web.Response:
+        if request.method == "OPTIONS":
+            return self._cors(web.Response(status=204))
+        if path == "/__sentinel/admin/canaries" and request.method == "GET":
+            canaries = []
+            health_tasks = {name: self._check_canary_health(name) for name in self.canary_names}
+            health_results = {}
+            for name, coro in health_tasks.items():
+                health_results[name] = await coro
+            for name in self.canary_names:
+                php_ver = PHP_VERSION_MAP.get(name, "?")
+                canaries.append({
+                    "name": name,
+                    "php_version": php_ver,
+                    "eol": php_ver in EOL_VERSIONS,
+                    "enabled": name not in self.disabled_canaries,
+                    "health": health_results.get(name, "unknown"),
+                    "url": self.canary_url_map[name],
+                    "metrics": self.metrics.per_canary.get(name, {}),
+                })
+            return self._cors(web.json_response({"canaries": canaries}))
+
+        if path.startswith("/__sentinel/admin/canaries/") and request.method == "POST":
+            parts = path.split("/")
+            if len(parts) == 6:
+                name = parts[4]
+                action = parts[5]
+                if name not in self.canary_url_map:
+                    return web.json_response({"error": f"Unknown canary: {name}"}, status=404)
+                if action == "enable":
+                    self.disabled_canaries.discard(name)
+                    self.log.info(f"ADMIN: Enabled canary [{name}]")
+                    return self._cors(web.json_response({"ok": True, "name": name, "enabled": True}))
+                elif action == "disable":
+                    self.disabled_canaries.add(name)
+                    self.log.info(f"ADMIN: Disabled canary [{name}]")
+                    return self._cors(web.json_response({"ok": True, "name": name, "enabled": False}))
+
+        if path == "/__sentinel/admin/canaries/bulk" and request.method == "POST":
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON"}, status=400)
+            enabled_list = data.get("enabled", [])
+            self.disabled_canaries = {n for n in self.canary_names if n not in enabled_list}
+            self.log.info(f"ADMIN: Bulk update — enabled={enabled_list}, disabled={list(self.disabled_canaries)}")
+            return self._cors(web.json_response({"ok": True, "enabled": enabled_list, "disabled": list(self.disabled_canaries)}))
+
+        return self._cors(web.json_response({"error": "Not found"}, status=404))
+
+    async def handle(self, request: web.Request) -> web.StreamResponse:
+        path = request.path_qs
+
+        if path.startswith("/__sentinel/admin/"):
+            return await self._handle_admin(request, path)
+
+        self.metrics.total_requests += 1
+        client_ip = request.remote or "unknown"
+
+        if path == "/__sentinel/health":
+            return self._cors(web.json_response({"status": "ok", **self.metrics.to_dict()}))
+        if path == "/__sentinel/metrics":
+            return self._cors(web.json_response(self.metrics.to_dict()))
+
+        if self.cfg.verbose:
+            self.log.debug(f"REQ {client_ip} {request.method} {path}")
+
+        body = await request.read()
+
+        if self.cfg.max_replay_body and len(body) > self.cfg.max_replay_body:
+            self.log.info(
+                f"BYPASS {client_ip} {request.method} {path} "
+                f"body={len(body)} exceeds max_replay_body"
+            )
+            self.metrics.bypassed += 1
+            return await self._forward_to_backend(request, body)
+
+        # ── Fan out to ALL canaries in parallel ──────────────────────
+        failed_canaries = await self._replay_to_all_canaries(request, body, client_ip)
+
+        if not failed_canaries:
+            self.metrics.forwarded += 1
+            return await self._forward_to_backend(request, body)
+        else:
+            self.metrics.blocked += 1
+            names = ", ".join(failed_canaries)
+            self.log.warning(f"BLOCKED {client_ip} {request.method} {path} — killed: [{names}]")
+            await self._log_blocked(request, body, client_ip, failed_canaries)
+            return web.Response(
+                status=403,
+                text=f"Request blocked by PHP Sentinel. Canary kill: [{names}]\n",
+                content_type="text/plain",
+            )
+
+    # ── Multi-canary parallel replay ─────────────────────────────────
+
+    async def _replay_to_all_canaries(
+        self,
+        request: web.Request,
+        body: bytes,
+        client_ip: str,
+    ) -> list[str]:
+        """
+        Replay to every canary in parallel.  Returns a list of canary
+        names that FAILED (empty = all survived = request is clean).
+        """
+        skip_headers = {
+            "host", "connection", "keep-alive", "transfer-encoding",
+            "te", "trailer", "upgrade",
+        }
+        headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in skip_headers
+        }
+        headers["X-Sentinel-Client-IP"] = client_ip
+
+        tasks = []
+        for canary_url, canary_name in zip(self.cfg.canary_urls, self.canary_names):
+            if canary_name in self.disabled_canaries:
+                continue
+            h = dict(headers)
+            h["Host"] = canary_name
+            tasks.append(self._replay_one(
+                canary_url, canary_name, request.method, request.path_qs, h, body, client_ip
+            ))
+
+        if not tasks:
+            self.log.warning(f"ALL canaries disabled — bypassing {client_ip} {request.method} {request.path_qs}")
+            return []
+
+        results = await asyncio.gather(*tasks)
+        return [name for name, ok in results if not ok]
+
+    async def _replay_one(
+        self,
+        canary_url: str,
+        canary_name: str,
+        method: str,
+        path_qs: str,
+        headers: dict,
+        body: bytes,
+        client_ip: str,
+    ) -> tuple[str, bool]:
+        target = canary_url + path_qs
+        try:
+            async with self._canary_session.request(
+                method=method,
+                url=target,
+                headers=headers,
+                data=body,
+                allow_redirects=False,
+                ssl=False,
+            ) as resp:
+                if resp.status in self.cfg.canary_fail_codes:
+                    self.log.warning(
+                        f"CANARY FAIL [{canary_name}] status={resp.status} "
+                        f"{client_ip} {method} {path_qs}"
+                    )
+                    self.metrics.canary_errors += 1
+                    self.metrics.per_canary[canary_name]["errors"] += 1
+                    return (canary_name, False)
+                return (canary_name, True)
+
+        except asyncio.TimeoutError:
+            self.log.warning(
+                f"CANARY TIMEOUT [{canary_name}] {client_ip} {method} {path_qs}"
+            )
+            self.metrics.canary_timeouts += 1
+            self.metrics.per_canary[canary_name]["timeouts"] += 1
+            return (canary_name, False)
+
+        except (aiohttp.ClientError, ConnectionError, OSError) as exc:
+            self.log.warning(
+                f"CANARY CRASH [{canary_name}] {type(exc).__name__}: {exc} "
+                f"{client_ip} {method} {path_qs}"
+            )
+            self.metrics.canary_errors += 1
+            self.metrics.per_canary[canary_name]["crashes"] += 1
+            return (canary_name, False)
+
+    # ── Backend forwarding ───────────────────────────────────────────
+
+    async def _forward_to_backend(
+        self,
+        request: web.Request,
+        body: bytes,
+    ) -> web.StreamResponse:
+        skip_headers = {
+            "host", "connection", "keep-alive", "transfer-encoding",
+            "te", "trailer", "upgrade",
+        }
+        headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in skip_headers
+        }
+        headers["Host"] = request.host
+        headers["X-Forwarded-For"] = request.remote or ""
+        headers["X-Forwarded-Proto"] = request.scheme
+
+        backend_target = self.cfg.backend_url + request.path_qs
+
+        try:
+            async with self._backend_session.request(
+                method=request.method,
+                url=backend_target,
+                headers=headers,
+                data=body,
+                allow_redirects=False,
+                ssl=False,
+            ) as resp:
+                excluded = {"transfer-encoding", "connection", "keep-alive"}
+                resp_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if k.lower() not in excluded
+                }
+                response = web.StreamResponse(
+                    status=resp.status,
+                    headers=resp_headers,
+                )
+                await response.prepare(request)
+                async for chunk in resp.content.iter_any():
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            self.log.error(f"BACKEND ERROR {type(exc).__name__}: {exc}")
+            return web.Response(
+                status=502,
+                text="Backend unavailable.\n",
+                content_type="text/plain",
+            )
+
+    # ── Block logging ────────────────────────────────────────────────
+
+    async def _log_blocked(
+        self,
+        request: web.Request,
+        body: bytes,
+        client_ip: str,
+        failed_canaries: list[str],
+    ):
+        if not self.cfg.block_log:
+            return
+        try:
+            entry = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "client_ip": client_ip,
+                "method": request.method,
+                "path": request.path_qs,
+                "content_type": request.content_type or "",
+                "content_length": len(body),
+                "killed_canaries": failed_canaries,
+                "headers": dict(request.headers),
+                "body_preview": body[:2048].decode("latin-1"),
+            }
+            with open(self.cfg.block_log, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as exc:
+            self.log.error(f"Failed to write block log: {exc}")
+
+
+# ── Application entry point ──────────────────────────────────────────
+
+async def run():
+    cfg = SentinelConfig.from_env()
+    logger = setup_logging(cfg)
+
+    proxy = SentinelProxy(cfg, logger)
+    await proxy.start()
+
+    logger.info(
+        f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
+        f"canaries={cfg.canary_urls}  backend={cfg.backend_url}"
+    )
+
+    app = web.Application(client_max_size=cfg.max_replay_body or 100 * 1024 * 1024)
+    app.router.add_route("*", "/{path_info:.*}", proxy.handle)
+
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+
+    site = web.TCPSite(runner, cfg.listen_host, cfg.listen_port)
+    await site.start()
+
+    stop_event = asyncio.Event()
+
+    def _shutdown(sig, frame):
+        logger.info(f"Received {signal.Signals(sig).name}, shutting down...")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    await stop_event.wait()
+
+    logger.info(f"Final metrics: {json.dumps(proxy.metrics.to_dict())}")
+    await proxy.stop()
+    await runner.cleanup()
+
+
+def main():
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()
