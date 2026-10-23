@@ -4,13 +4,16 @@
 
 On October 21, 2026, two critical RCE vulnerabilities were disclosed in PHP — **CVE-2026-109618** and **CVE-2026-109619**, collectively known as **php2shell**. CVSS 9.2. Every PHP version from 5.4 through 8.5.11 is affected.
 
-Patches exist for PHP 8.2.35, 8.3.36, 8.4.27, and 8.5.12. But PHP 8.1 and earlier? End of life. **No patch is coming.** That's roughly 40% of all PHP websites — millions of servers that are permanently vulnerable.
+Patches exist for PHP 8.2.35, 8.3.36, 8.4.27, and 8.5.12. But PHP 8.1 and earlier? End of life. **No patch is coming.** A significant share of PHP deployments still run EOL versions with no upgrade path.
 
 The standard mitigation is to disable `session.upload_progress.enabled`, but that only covers one of the two attack paths. The OOM corruption vector in CVE-2026-109618 has no PHP config-level fix.
 
 ## The Solution
 
-**PHP Sentinel** is a reverse proxy that sits in front of your PHP application and replays every HTTP request through an array of 11 isolated "canary" PHP-FPM instances (PHP 5.6 through 8.4) running in parallel. If **any** canary worker crashes, OOMs, or hangs — the request is blocked before production ever sees it.
+**PHP Sentinel** is a reverse proxy with two layers of protection:
+
+1. **Upload-progress filter** — blocks any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`, the root attack surface for CVE-2026-109618. Deterministic, no latency cost.
+2. **Canary array** — replays every request through 11 isolated PHP-FPM instances (PHP 5.6–8.4) in parallel. If any canary worker crashes, OOMs, or hangs, the request is blocked before production sees it.
 
 ```
 Client Request
@@ -18,7 +21,9 @@ Client Request
        v
    Sentinel Proxy (Python/aiohttp)
        |
-       Fan out to ALL canaries in parallel
+       Upload-progress field? --> YES --> Block (403)
+       |
+       NO --> Fan out to ALL canaries in parallel
        |
   [PHP 8.4] [PHP 8.3] [PHP 8.2] ... [PHP 7.0] [PHP 5.6]
        |
@@ -26,22 +31,27 @@ Client Request
        ANY died?     --> Block (403)
 ```
 
-No signatures. No pattern matching. No rule updates. The PHP parser itself is the detector.
+The upload-progress filter is deterministic. The canary array uses behavioral detection — no signatures, no pattern matching, no rule updates.
 
 ## Why It Works
 
-PHP parser exploits — use-after-free, OOM corruption, boundary parsing crashes — all trigger during request parsing in the SAPI layer. The canary instances run in complete isolation: no database, no secrets, no network egress. Their only job is to parse the request. If parsing kills the worker, the request is malicious.
+The upload-progress filter directly blocks the CVE-2026-109618 attack surface. The canary array provides defense in depth: PHP parser exploits — OOM corruption, boundary parsing crashes — trigger during request parsing in the SAPI layer. The canary instances run in isolation on an internal Docker network: no database, no secrets, no egress to the backend. Their only job is to parse the request. If parsing kills the worker, the request is blocked.
 
-This catches:
-- **Known exploits** like php2shell (both CVEs)
-- **Unknown future exploits** targeting the PHP parser — zero-days get caught on day zero
+The canary array catches:
+- **Known crash-inducing exploits** like the OOM vectors in php2shell
+- **Unknown future parser bugs** that crash PHP workers
 - **Version-specific bugs** — an exploit targeting PHP 7.4's parser but not 8.4's still gets caught because 7.4 is in the canary array
+
+**Limitations of the canary approach:**
+- Exploits that succeed without crashing the worker (silent RCE) are not detected by the canaries. The upload-progress filter is the primary defense against CVE-2026-109618.
+- CVE-2026-109619's cross-request state corruption requires grooming across multiple requests. Single-request canary replay does not reproduce this.
+- Canaries run `memory_limit=16M`, not production's config. OOM thresholds can differ.
 
 ## Test Results
 
-### Kill Test Suite (28/28 blocked)
+### Kill Test Suite
 
-Built-in test suite covering multiple attack vectors:
+Built-in test suite covering worker crashes, memory pressure, and CVE exploit vectors.
 
 ```
 PASS     Clean GET                                    HTTP 200
@@ -49,18 +59,15 @@ PASS     Clean POST                                   HTTP 200
 BLOCKED  SIGKILL worker                               HTTP 403
 BLOCKED  Timeout (hung worker)                        HTTP 403
 BLOCKED  OOM (memory bomb)                            HTTP 403
+BLOCKED  CVE vector: session upload + truncated multipart  HTTP 403 (filter)
 BLOCKED  20MB body -> php://input OOM                 HTTP 403
 BLOCKED  4x concurrent 15MB worker kills              HTTP 403 (4/4)
 BLOCKED  20x session upload progress spam             HTTP 403 (20/20)
 
-Per-canary breakdown:
-  canary-84: errors=28  canary-83: errors=28  canary-82: errors=28
-  canary-81: errors=28  canary-80: errors=28  canary-74: errors=28
-  canary-73: errors=28  canary-72: errors=28  canary-71: errors=28
-  canary-70: errors=28  canary-56: errors=28
+Per-canary breakdown: 24 errors each across all 11 versions (264 total).
 ```
 
-308 total canary errors = 28 attacks x 11 PHP versions. Every attack caught across every version.
+All attack vectors blocked. Clean requests forwarded.
 
 ### Real CVE-2026-109618 PoC Exploit (Blocked)
 
@@ -99,7 +106,9 @@ Traditional WAFs (ModSecurity, Cloudflare WAF, etc.) use signature matching — 
 - Rules need constant updates as new exploits emerge
 - Evasion techniques can bypass pattern matching
 
-Sentinel uses **behavioral detection**. It doesn't look at what the request contains — it observes what the request *does* to a PHP parser. If the parser dies, the request is bad. This is fundamentally unforgeable: you can't craft a request that crashes PHP but somehow doesn't crash PHP.
+Sentinel's canary array uses **behavioral detection**. It doesn't look at what the request contains — it observes what the request *does* to a PHP parser. If the parser dies, the request is blocked. This catches crash-inducing exploits that signatures haven't been written for yet.
+
+The tradeoff: exploits that succeed without crashing the worker are invisible to the canaries. That's why the upload-progress filter exists as the primary deterministic layer.
 
 Sentinel and WAFs complement each other. Use both.
 
