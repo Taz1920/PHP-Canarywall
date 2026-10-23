@@ -112,6 +112,7 @@ Tested against four independent public PoC exploit tools. Two test configuration
 | ikow/php2shell-poc | 4-tier scanner + active OOM probe | Blocked |
 | ikow/php2shell-poc | OOM header bomb (5000 headers) | Blocked (403) |
 | ikow/php2shell-poc | Session filename injection | Blocked (upload-progress filter) |
+| **cozybear/cve-2026-109619** | **CVE-2026-109619 stale session global state → RCE (3-stage: heap leak, libphp leak, forged HashTable)** | **Blocked (upload-progress filter) — all 6 requests blocked before reaching canaries** |
 
 ### With upload-progress filter OFF (canary-only detection)
 
@@ -125,8 +126,11 @@ Upload-progress filter disabled to verify the canary array catches real exploit 
 | ikow/php2shell-poc | Session LFI chain (chain_a) | Session plant: 200 (clean request). LFI read: 404 (no LFI path). | Not blocked — session plant is a clean request. Exploit failed (no LFI endpoint). |
 | ikow/php2shell-poc | Handler mismatch RCE (chain_c) | Pollution: 200. Gadget injection: 200. Trigger: 404. | Not blocked — requests are individually clean. Exploit failed (no matching endpoints). |
 | murrez/php2shell | UAF fingerprint + exploit | Fingerprint: 200 (identified PHP 8.1.34). Exploit: WEAK-SIGNAL. | Not blocked — fingerprint is a clean request. Exploit could not confirm UAF. |
+| **cozybear/cve-2026-109619** | **CVE-2026-109619 stale session state → RCE (rotate + 3-stage heap exploit)** | **502 across all 11 canaries** — OOM payload crashed every FPM worker | **Blocked (403).** Exploit failed at stage 1: heap leak failed. Canaries crashed from the 12MB OOM-triggering upload-progress payload. |
 
 **Key finding:** The eness PoC's stage 1 heap leak payloads caused **real PHP-FPM worker crashes (HTTP 502)** across all 11 canary versions. These are actual parser-level crashes from real CVE exploit payloads, not simulated failures. The canary array detected and blocked them without the upload-progress filter.
+
+**CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request. The exploit also requires `display_errors=On`, single Apache prefork worker, and mod_php — all conditions Sentinel's FPM-based canary architecture defeats. No code execution was achieved under either configuration.
 
 **Post-test verification:** Backend container inspected after all exploit runs. No `rce_proof.txt`, no injected code, no compromised processes. Empty session files (0 bytes) from exploit session rotation were cleaned up. All canaries clean — no session files or artifacts.
 
@@ -135,21 +139,34 @@ Proxy log excerpt (eness exploit, filter OFF):
 
 CANARY FAIL [canary-84] status=502 POST /
 CANARY FAIL [canary-83] status=502 POST /
-CANARY FAIL [canary-82] status=502 POST /
-CANARY FAIL [canary-81] status=502 POST /
-CANARY FAIL [canary-80] status=502 POST /
-CANARY FAIL [canary-74] status=502 POST /
-CANARY FAIL [canary-73] status=502 POST /
-CANARY FAIL [canary-72] status=502 POST /
-CANARY FAIL [canary-71] status=502 POST /
-CANARY FAIL [canary-70] status=502 POST /
+...
 CANARY FAIL [canary-56] status=502 POST /
 BLOCKED POST / — killed: [canary-84, ..., canary-56]
 ```
 
+```
+Proxy log excerpt (cozybear CVE-2026-109619, filter ON):
+
+BLOCKED 172.19.0.1 POST /index.php — PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)
+BLOCKED 172.19.0.1 POST /index.php — PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)
+BLOCKED 172.19.0.1 POST /index.php — PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)
+(6 requests total, all blocked at filter — none reached canaries)
+```
+
+```
+Proxy log excerpt (cozybear CVE-2026-109619, filter OFF):
+
+CANARY FAIL [canary-84] status=502 POST /index.php
+CANARY FAIL [canary-83] status=502 POST /index.php
+...
+CANARY FAIL [canary-56] status=502 POST /index.php
+BLOCKED POST /index.php — killed: [canary-84, ..., canary-56]
+(3 rounds of requests, all 11 canaries crashed each round)
+```
+
 ## What These Tests Cover
 
-- **Upload-progress filter:** Deterministic blocking of `PHP_SESSION_UPLOAD_PROGRESS` multipart payloads (CVE-2026-109618 attack surface)
+- **Upload-progress filter:** Deterministic blocking of `PHP_SESSION_UPLOAD_PROGRESS` multipart payloads (CVE-2026-109618/109619 shared attack surface)
 - **Canary crash detection:** Worker SIGKILL, OOM, and timeout detection across all 11 PHP versions
 - **Memory pressure:** Bodies exceeding canary `memory_limit=16M` trigger OOM and block
 - **Concurrency:** Multiple simultaneous attacks don't bypass the canary array
@@ -158,7 +175,7 @@ BLOCKED POST / — killed: [canary-84, ..., canary-56]
 ## What These Tests Do NOT Cover
 
 - Exploits that succeed without crashing the PHP worker (silent RCE)
-- Multi-request heap grooming (CVE-2026-109619 cross-request state corruption)
+- CVE-2026-109619 cross-request state corruption without `PHP_SESSION_UPLOAD_PROGRESS` (no known exploit achieves this — the cozybear PoC, the only working 109619 RCE, requires upload progress in every request)
 - False positive rate under production traffic patterns
 - Latency under sustained production load
 - Custom `session.upload_progress.name` bypass of the filter

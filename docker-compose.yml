@@ -12,10 +12,11 @@ x-canary-base: &canary-base
     retries: 5
     start_period: 30s
   volumes:
-    - ./canary/index.php:/var/www/canary/index.php:ro
+    - ./canary/index.php:/mnt/canary/index.php:ro
     - ./canary/php.ini:/usr/local/etc/php/conf.d/sentinel-canary.ini:ro
     - ./canary/fpm.conf:/usr/local/etc/php-fpm.d/canary.conf:ro
     - ./canary/nginx.conf:/etc/nginx/nginx.conf:ro
+    - ./canary/entrypoint.sh:/entrypoint.sh:ro
   restart: unless-stopped
   networks:
     - canary-net
