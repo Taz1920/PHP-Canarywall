@@ -36,6 +36,7 @@ class SentinelConfig:
     listen_host: str = "0.0.0.0"
     canary_timeout: float = 5.0
     max_replay_body: int = 32 * 1024 * 1024
+    max_body_size: int = 100 * 1024 * 1024
     replay_methods: list = field(default_factory=lambda: [
         "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
     ])
@@ -61,6 +62,7 @@ class SentinelConfig:
         cfg.listen_host = os.getenv("SENTINEL_HOST", cfg.listen_host)
         cfg.canary_timeout = float(os.getenv("SENTINEL_CANARY_TIMEOUT", cfg.canary_timeout))
         cfg.max_replay_body = int(os.getenv("SENTINEL_MAX_REPLAY_BODY", cfg.max_replay_body))
+        cfg.max_body_size = int(os.getenv("SENTINEL_MAX_BODY_SIZE", cfg.max_body_size))
         cfg.log_file = os.getenv("SENTINEL_LOG_FILE", cfg.log_file)
         cfg.block_log = os.getenv("SENTINEL_BLOCK_LOG", cfg.block_log)
         cfg.verbose = os.getenv("SENTINEL_VERBOSE", "").lower() in ("1", "true", "yes")
@@ -260,6 +262,8 @@ class SentinelProxy:
                     "canary_timeout": self.cfg.canary_timeout,
                     "max_replay_body": self.cfg.max_replay_body,
                     "max_replay_body_mb": round(self.cfg.max_replay_body / (1024 * 1024), 1) if self.cfg.max_replay_body else 0,
+                    "max_body_size": self.cfg.max_body_size,
+                    "max_body_size_mb": round(self.cfg.max_body_size / (1024 * 1024), 1) if self.cfg.max_body_size else 0,
                     "canary_fail_codes": self.cfg.canary_fail_codes,
                     "backend_url": self.cfg.backend_url,
                     "verbose": self.cfg.verbose,
@@ -588,7 +592,7 @@ async def run():
     else:
         logger.info("Admin API authentication enabled (SENTINEL_ADMIN_KEY is set)")
 
-    app = web.Application(client_max_size=cfg.max_replay_body or 100 * 1024 * 1024)
+    app = web.Application(client_max_size=cfg.max_body_size or 100 * 1024 * 1024)
     app.router.add_route("*", "/{path_info:.*}", proxy.handle)
 
     runner = web.AppRunner(app, access_log=None)

@@ -53,7 +53,12 @@ Every canary runs in isolation: no database, no secrets, no network egress. Its 
 
 ## Request Size Limits
 
-Canaries run with `memory_limit=16M`, so uploads larger than ~15MB will OOM the canary workers and be blocked. The proxy's `SENTINEL_MAX_REPLAY_BODY` (default 32MB) sets the maximum body size accepted; requests exceeding it are rejected with HTTP 413.
+Two separate limits control body handling:
+
+- **`SENTINEL_MAX_BODY_SIZE`** (default 100MB) — maximum body the proxy accepts. Anything larger gets HTTP 413.
+- **`SENTINEL_MAX_REPLAY_BODY`** (default 32MB) — maximum body replayed through canaries. Bodies between this and `MAX_BODY_SIZE` bypass the canaries and go straight to the backend.
+
+Canaries run with `memory_limit=16M`, so bodies larger than ~15MB will OOM canary workers and be blocked. Set `SENTINEL_MAX_REPLAY_BODY=0` to force all requests through canaries regardless of size.
 
 ## Features
 
@@ -122,7 +127,8 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_BACKEND_URL` | `http://backend:80` | Production backend URL |
 | `SENTINEL_PORT` | `8080` | Proxy listen port |
 | `SENTINEL_CANARY_TIMEOUT` | `5` | Seconds to wait for canary response |
-| `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay (32MB). Larger requests bypass canaries. |
+| `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay through canaries (32MB). Larger requests bypass canaries and go straight to the backend. |
+| `SENTINEL_MAX_BODY_SIZE` | `104857600` | Max body size the proxy accepts (100MB). Requests exceeding this get HTTP 413. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
 | `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`. This is the attack surface for CVE-2026-109618/109619. Set to `false` only if your app uses PHP's session upload progress feature. |
 | `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
