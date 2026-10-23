@@ -351,7 +351,7 @@ class SentinelProxy:
                 self.metrics.blocked += 1
                 self.log.warning(
                     f"BLOCKED {client_ip} {request.method} {path} — "
-                    f"PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618/109619 vector)"
+                    f"PHP_SESSION_UPLOAD_PROGRESS in multipart body (CVE-2026-109618 vector)"
                 )
                 await self._log_blocked(request, body, client_ip, ["upload_progress_blocked"])
                 return web.Response(

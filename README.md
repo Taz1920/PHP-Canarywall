@@ -1,6 +1,6 @@
 # PHP Sentinel
 
-A reverse proxy that defends PHP applications against CVE-2026-109618, CVE-2026-109619, and the broader class of PHP SAPI parsing exploits. Two layers of protection:
+A reverse proxy that defends PHP applications against CVE-2026-109618 and the broader class of PHP SAPI crash-inducing exploits. Two layers of protection:
 
 1. **Upload-progress filter** (primary) — blocks any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`, the root attack surface for CVE-2026-109618. Deterministic, no latency cost.
 2. **Canary array** (defense in depth) — replays every request through 11 isolated PHP-FPM instances (PHP 5.6–8.4) in parallel. If any canary worker crashes, OOMs, or hangs, the request is blocked before production sees it. Catches unknown parser bugs that the filter doesn't cover.
@@ -46,9 +46,9 @@ Every canary runs in isolation: no database, no secrets, no network egress. Its 
 
 ### Limitations
 
-- The canary array detects exploits that **crash** PHP workers. A successful RCE that runs without crashing is not caught by the canaries — the upload-progress filter is the primary defense against CVE-2026-109619's use-after-free.
+- The canary array detects exploits that **crash** PHP workers. A successful RCE that runs without crashing is not caught by the canaries.
 - Canaries run `memory_limit=16M`, not production's config. OOM thresholds can differ. The canaries are a safety net, not a guarantee.
-- CVE-2026-109619 corrupts worker state across multiple requests. Single-request canary replay does not reproduce multi-request heap grooming. The upload-progress filter covers this gap.
+- CVE-2026-109619 corrupts worker state across multiple requests. Single-request canary replay does not reproduce multi-request heap grooming. **Sentinel does not cover CVE-2026-109619 — patching or taking the system offline is the only mitigation.**
 - Adds latency per request (parallel canary replay, bounded by the slowest canary). The upload-progress filter adds none.
 
 ## Request Size Limits
@@ -130,7 +130,7 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay through canaries (32MB). Larger requests bypass canaries and go straight to the backend. |
 | `SENTINEL_MAX_BODY_SIZE` | `104857600` | Max body size the proxy accepts (100MB). Requests exceeding this get HTTP 413. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
-| `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`. This is the attack surface for CVE-2026-109618/109619. Set to `false` only if your app uses PHP's session upload progress feature. |
+| `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`. This is the attack surface for CVE-2026-109618. Set to `false` only if your app uses PHP's session upload progress feature. |
 | `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
 | `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |
