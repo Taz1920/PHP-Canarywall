@@ -224,6 +224,57 @@ class SentinelProxy:
             self.log.info(f"ADMIN: Bulk update — enabled={enabled_list}, disabled={list(self.disabled_canaries)}")
             return self._cors(web.json_response({"ok": True, "enabled": enabled_list, "disabled": list(self.disabled_canaries)}))
 
+        if path == "/__sentinel/admin/config" and request.method == "GET":
+            return self._cors(web.json_response({
+                "config": {
+                    "canary_timeout": self.cfg.canary_timeout,
+                    "max_replay_body": self.cfg.max_replay_body,
+                    "max_replay_body_mb": round(self.cfg.max_replay_body / (1024 * 1024), 1) if self.cfg.max_replay_body else 0,
+                    "canary_fail_codes": self.cfg.canary_fail_codes,
+                    "backend_url": self.cfg.backend_url,
+                    "verbose": self.cfg.verbose,
+                    "block_log": self.cfg.block_log,
+                }
+            }))
+
+        if path == "/__sentinel/admin/config" and request.method == "POST":
+            try:
+                data = await request.json()
+            except Exception:
+                return self._cors(web.json_response({"error": "Invalid JSON"}, status=400))
+            changed = []
+            if "canary_timeout" in data:
+                val = float(data["canary_timeout"])
+                if val > 0:
+                    self.cfg.canary_timeout = val
+                    if self._canary_session:
+                        await self._canary_session.close()
+                    self._canary_session = aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=val)
+                    )
+                    changed.append(f"canary_timeout={val}")
+            if "max_replay_body" in data:
+                val = int(data["max_replay_body"])
+                self.cfg.max_replay_body = max(0, val)
+                changed.append(f"max_replay_body={val}")
+            if "max_replay_body_mb" in data:
+                mb = float(data["max_replay_body_mb"])
+                self.cfg.max_replay_body = int(mb * 1024 * 1024)
+                changed.append(f"max_replay_body={self.cfg.max_replay_body}")
+            if "verbose" in data:
+                self.cfg.verbose = bool(data["verbose"])
+                self.log.setLevel(logging.DEBUG if self.cfg.verbose else logging.INFO)
+                changed.append(f"verbose={self.cfg.verbose}")
+            if "canary_fail_codes" in data:
+                codes = [int(c) for c in data["canary_fail_codes"]]
+                self.cfg.canary_fail_codes = codes
+                changed.append(f"canary_fail_codes={codes}")
+            if "backend_url" in data:
+                self.cfg.backend_url = str(data["backend_url"]).rstrip("/")
+                changed.append(f"backend_url={self.cfg.backend_url}")
+            self.log.info(f"ADMIN: Config updated — {', '.join(changed)}")
+            return self._cors(web.json_response({"ok": True, "changed": changed}))
+
         return self._cors(web.json_response({"error": "Not found"}, status=404))
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
