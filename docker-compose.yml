@@ -36,6 +36,7 @@ services:
     volumes:
       - sentinel-logs:/var/log/sentinel
       - ./proxy/sentinel.py:/app/sentinel.py:ro
+      - ./dashboard:/app/dashboard:ro
     depends_on:
       canary-84:
         condition: service_healthy

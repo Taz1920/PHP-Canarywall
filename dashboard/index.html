@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHP Sentinel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --bg: #0c0e13;
+  --bg-card: #151820;
+  --bg-card-hover: #1a1f2a;
+  --fg: #e2e4e9;
+  --fg-dim: #7a7f8e;
+  --fg-muted: #4a4f5e;
+  --accent: #6c8cff;
+  --accent-glow: rgba(108, 140, 255, 0.15);
+  --green: #34d399;
+  --green-dim: rgba(52, 211, 153, 0.12);
+  --red: #f87171;
+  --red-dim: rgba(248, 113, 113, 0.12);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.12);
+  --border: #1e2230;
+  --radius: 10px;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f5f7; --bg-card: #ffffff; --bg-card-hover: #f9fafb;
+    --fg: #111827; --fg-dim: #6b7280; --fg-muted: #9ca3af;
+    --accent: #4f6ce5; --accent-glow: rgba(79, 108, 229, 0.1);
+    --green: #059669; --green-dim: rgba(5, 150, 105, 0.08);
+    --red: #dc2626; --red-dim: rgba(220, 38, 38, 0.08);
+    --amber: #d97706; --amber-dim: rgba(217, 119, 6, 0.08);
+    --border: #e5e7eb; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f5f7; --bg-card: #ffffff; --bg-card-hover: #f9fafb;
+  --fg: #111827; --fg-dim: #6b7280; --fg-muted: #9ca3af;
+  --accent: #4f6ce5; --accent-glow: rgba(79, 108, 229, 0.1);
+  --green: #059669; --green-dim: rgba(5, 150, 105, 0.08);
+  --red: #dc2626; --red-dim: rgba(220, 38, 38, 0.08);
+  --amber: #d97706; --amber-dim: rgba(217, 119, 6, 0.08);
+  --border: #e5e7eb; color-scheme: light;
+}
+body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-height: 100vh; }
+* { box-sizing: border-box; }
+.header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 24px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+.header h1 { font-family: 'JetBrains Mono', monospace; font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+.header h1 .shield { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--accent-glow); border: 1px solid var(--accent); }
+.header h1 .shield svg { width: 18px; height: 18px; }
+.header-right { display: flex; align-items: center; gap: 16px; }
+.status-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding: 5px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+.status-badge.online { background: var(--green-dim); color: var(--green); }
+.status-badge.offline { background: var(--red-dim); color: var(--red); }
+.status-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.status-badge.online .dot { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.metrics-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.metric-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.metric-tile .label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-dim); margin-bottom: 6px; }
+.metric-tile .value { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.metric-tile .value.green { color: var(--green); }
+.metric-tile .value.red { color: var(--red); }
+.metric-tile .value.amber { color: var(--amber); }
+.section-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.section-header h2 { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); margin: 0; }
+.section-header .count { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--fg-muted); }
+.quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { font-family: 'Inter', system-ui, sans-serif; font-size: 0.78rem; font-weight: 500; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-dim); cursor: pointer; transition: all 0.15s; }
+.btn:hover { background: var(--bg-card-hover); color: var(--fg); border-color: var(--fg-muted); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { opacity: 0.85; }
+.canary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 40px; }
+.canary-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s, background 0.15s; position: relative; overflow: hidden; }
+.canary-card:hover { background: var(--bg-card-hover); border-color: var(--fg-muted); }
+.canary-card.disabled { opacity: 0.45; }
+.canary-card .version-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.canary-card .php-ver { font-family: 'JetBrains Mono', monospace; font-size: 1.3rem; font-weight: 700; }
+.canary-card .php-label { font-size: 0.72rem; font-weight: 600; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle .slider { position: absolute; inset: 0; background: var(--fg-muted); border-radius: 12px; cursor: pointer; transition: background 0.2s; }
+.toggle .slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+.toggle input:checked + .slider { background: var(--green); }
+.toggle input:checked + .slider::before { transform: translateX(20px); }
+.toggle input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 500; letter-spacing: 0.03em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; }
+.badge.eol { background: var(--red-dim); color: var(--red); }
+.badge.supported { background: var(--green-dim); color: var(--green); }
+.badge.health-ok { background: var(--green-dim); color: var(--green); }
+.badge.health-bad { background: var(--red-dim); color: var(--red); }
+.badge.health-unknown { background: var(--amber-dim); color: var(--amber); }
+.canary-card .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.canary-card .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.canary-card .stat { text-align: center; }
+.canary-card .stat .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.canary-card .stat .stat-label { font-size: 0.62rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); margin-top: 2px; }
+.config-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+.config-panel .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.config-field { display: flex; flex-direction: column; gap: 5px; }
+.config-field .field-label { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-dim); }
+.config-field .field-desc { font-size: 0.66rem; color: var(--fg-muted); margin-top: -2px; }
+.config-field input[type="number"], .config-field input[type="text"], .config-field select { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
+.config-field input:focus, .config-field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.config-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.toggle-row { display: flex; align-items: center; gap: 10px; height: 34px; }
+.toggle-row .field-inline-label { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--fg); }
+.footer { padding: 20px 0; border-top: 1px solid var(--border); font-size: 0.72rem; color: var(--fg-muted); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.footer .endpoint { font-family: 'JetBrains Mono', monospace; }
+.loading { display: flex; align-items: center; justify-content: center; padding: 60px 20px; color: var(--fg-dim); font-size: 0.85rem; }
+.spin { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; padding: 10px 20px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border); color: var(--fg); opacity: 0; transition: all 0.3s; z-index: 100; pointer-events: none; }
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>
+    <span class="shield">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+    </span>
+    PHP Sentinel
+  </h1>
+  <div class="header-right">
+    <div id="conn-status" class="status-badge offline">
+      <span class="dot"></span>
+      <span>Offline</span>
+    </div>
+  </div>
+</div>
+
+<div class="metrics-bar">
+  <div class="metric-tile"><div class="label">Requests</div><div class="value" id="m-total">--</div></div>
+  <div class="metric-tile"><div class="label">Forwarded</div><div class="value green" id="m-fwd">--</div></div>
+  <div class="metric-tile"><div class="label">Blocked</div><div class="value red" id="m-blocked">--</div></div>
+  <div class="metric-tile"><div class="label">Block Rate</div><div class="value amber" id="m-rate">--</div></div>
+  <div class="metric-tile"><div class="label">Uptime</div><div class="value" id="m-uptime">--</div></div>
+</div>
+
+<div class="section-header">
+  <h2>Configuration</h2>
+  <div class="quick-actions"><button class="btn" id="btn-config-toggle">Show</button></div>
+</div>
+<div class="config-panel" id="config-panel" hidden>
+  <div class="config-grid">
+    <div class="config-field">
+      <span class="field-label">Backend URL</span>
+      <span class="field-desc">Production server address</span>
+      <input type="text" id="cfg-backend-url" placeholder="http://backend:80">
+    </div>
+    <div class="config-field">
+      <span class="field-label">Canary Timeout</span>
+      <span class="field-desc">Seconds to wait for canary response</span>
+      <input type="number" id="cfg-canary-timeout" min="1" max="60" step="1">
+    </div>
+    <div class="config-field">
+      <span class="field-label">Max Replay Body (MB)</span>
+      <span class="field-desc">0 = no bypass, all requests go through canaries</span>
+      <input type="number" id="cfg-max-body-mb" min="0" max="512" step="1">
+    </div>
+    <div class="config-field">
+      <span class="field-label">Fail Codes</span>
+      <span class="field-desc">HTTP codes that count as canary failure</span>
+      <input type="text" id="cfg-fail-codes" placeholder="500,502,503,504">
+    </div>
+    <div class="config-field">
+      <span class="field-label">Verbose Logging</span>
+      <span class="field-desc">Log every request (debug mode)</span>
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="cfg-verbose"><span class="slider"></span></label>
+        <span class="field-inline-label" id="cfg-verbose-label">Off</span>
+      </div>
+    </div>
+    <div class="config-field">
+      <span class="field-label">Block Log Path</span>
+      <span class="field-desc">Where blocked requests are logged (read-only)</span>
+      <input type="text" id="cfg-block-log" disabled>
+    </div>
+  </div>
+  <div class="config-actions">
+    <button class="btn primary" id="btn-config-save">Save Configuration</button>
+    <button class="btn" id="btn-config-reload">Reset</button>
+  </div>
+</div>
+
+<div class="section-header">
+  <h2>Canary Array <span id="canary-count" class="count"></span></h2>
+  <div class="quick-actions">
+    <button class="btn" id="btn-enable-all">Enable All</button>
+    <button class="btn" id="btn-disable-all">Disable All</button>
+    <button class="btn" id="btn-eol-only">EOL Only</button>
+    <button class="btn" id="btn-refresh">Refresh</button>
+  </div>
+</div>
+
+<div id="canary-grid" class="canary-grid">
+  <div class="loading"><span class="spin"></span> Connecting to Sentinel...</div>
+</div>
+
+<div class="footer">
+  <span>PHP Sentinel Dashboard</span>
+  <span class="endpoint" id="footer-endpoint"></span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  var connStatus = document.getElementById('conn-status');
+  var grid = document.getElementById('canary-grid');
+  var countEl = document.getElementById('canary-count');
+  var toastEl = document.getElementById('toast');
+  var footerEp = document.getElementById('footer-endpoint');
+  var canaries = [];
+  var refreshTimer = null;
+  var toastTimer = null;
+
+  function apiBase() { return ''; }
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, 2500);
+  }
+
+  function formatUptime(s) {
+    if (s < 60) return Math.round(s) + 's';
+    if (s < 3600) return Math.round(s / 60) + 'm';
+    var h = Math.floor(s / 3600);
+    var m = Math.round((s % 3600) / 60);
+    return h + 'h ' + m + 'm';
+  }
+
+  async function fetchCanaries() {
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      canaries = data.canaries || [];
+      setOnline(true);
+      renderCanaries();
+    } catch (e) {
+      setOnline(false);
+      grid.innerHTML = '<div class="loading">Cannot reach Sentinel</div>';
+    }
+  }
+
+  async function fetchMetrics() {
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/metrics');
+      if (!resp.ok) return;
+      var m = await resp.json();
+      document.getElementById('m-total').textContent = m.total_requests;
+      document.getElementById('m-fwd').textContent = m.forwarded;
+      document.getElementById('m-blocked').textContent = m.blocked;
+      document.getElementById('m-rate').textContent = m.block_rate_pct + '%';
+      document.getElementById('m-uptime').textContent = formatUptime(m.uptime_seconds);
+    } catch (e) {}
+  }
+
+  function setOnline(on) {
+    connStatus.className = 'status-badge ' + (on ? 'online' : 'offline');
+    connStatus.querySelector('span:last-child').textContent = on ? 'Online' : 'Offline';
+    footerEp.textContent = window.location.origin;
+  }
+
+  function renderCanaries() {
+    var enabled = canaries.filter(function(c) { return c.enabled; }).length;
+    countEl.textContent = '(' + enabled + '/' + canaries.length + ' active)';
+    var sorted = canaries.slice().sort(function(a, b) {
+      return (parseFloat(b.php_version) || 0) - (parseFloat(a.php_version) || 0);
+    });
+    grid.innerHTML = '';
+    sorted.forEach(function(c) {
+      var card = document.createElement('div');
+      card.className = 'canary-card' + (c.enabled ? '' : ' disabled');
+      var healthClass = 'health-unknown';
+      var healthLabel = c.health || 'unknown';
+      if (c.health === 'healthy') healthClass = 'health-ok';
+      else if (c.health === 'unhealthy' || c.health === 'unreachable') healthClass = 'health-bad';
+      var m = c.metrics || {};
+      card.innerHTML =
+        '<div class="version-row"><div><div class="php-label">PHP</div><div class="php-ver">' + c.php_version + '</div></div>' +
+        '<label class="toggle"><input type="checkbox"' + (c.enabled ? ' checked' : '') + ' data-canary="' + c.name + '"><span class="slider"></span></label></div>' +
+        '<div class="badges"><span class="badge ' + (c.eol ? 'eol' : 'supported') + '">' + (c.eol ? 'EOL' : 'Supported') + '</span>' +
+        '<span class="badge ' + healthClass + '">' + healthLabel + '</span></div>' +
+        '<div class="stats"><div class="stat"><div class="stat-val">' + (m.errors || 0) + '</div><div class="stat-label">Errors</div></div>' +
+        '<div class="stat"><div class="stat-val">' + (m.timeouts || 0) + '</div><div class="stat-label">Timeouts</div></div>' +
+        '<div class="stat"><div class="stat-val">' + (m.crashes || 0) + '</div><div class="stat-label">Crashes</div></div></div>';
+      grid.appendChild(card);
+    });
+    grid.querySelectorAll('input[data-canary]').forEach(function(inp) {
+      inp.addEventListener('change', function() {
+        toggleCanary(this.dataset.canary, this.checked ? 'enable' : 'disable');
+      });
+    });
+  }
+
+  async function toggleCanary(name, action) {
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries/' + name + '/' + action, { method: 'POST' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      toast(name + ' ' + action + 'd');
+      await fetchCanaries();
+    } catch (e) { toast('Failed: ' + e.message); await fetchCanaries(); }
+  }
+
+  async function bulkSet(list) {
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries/bulk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: list })
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      await fetchCanaries();
+    } catch (e) { toast('Failed: ' + e.message); }
+  }
+
+  document.getElementById('btn-enable-all').addEventListener('click', function() {
+    bulkSet(canaries.map(function(c) { return c.name; })); toast('All canaries enabled');
+  });
+  document.getElementById('btn-disable-all').addEventListener('click', function() {
+    bulkSet([]); toast('All canaries disabled');
+  });
+  document.getElementById('btn-eol-only').addEventListener('click', function() {
+    bulkSet(canaries.filter(function(c) { return c.eol; }).map(function(c) { return c.name; })); toast('EOL canaries only');
+  });
+  document.getElementById('btn-refresh').addEventListener('click', function() {
+    fetchCanaries(); fetchMetrics(); toast('Refreshed');
+  });
+
+  // Config panel
+  var configPanel = document.getElementById('config-panel');
+  var configToggleBtn = document.getElementById('btn-config-toggle');
+  configToggleBtn.addEventListener('click', function() {
+    if (configPanel.hidden) { configPanel.hidden = false; configToggleBtn.textContent = 'Hide'; fetchConfig(); }
+    else { configPanel.hidden = true; configToggleBtn.textContent = 'Show'; }
+  });
+  document.getElementById('cfg-verbose').addEventListener('change', function() {
+    document.getElementById('cfg-verbose-label').textContent = this.checked ? 'On' : 'Off';
+  });
+
+  async function fetchConfig() {
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/admin/config');
+      if (!resp.ok) return;
+      var c = (await resp.json()).config;
+      document.getElementById('cfg-backend-url').value = c.backend_url || '';
+      document.getElementById('cfg-canary-timeout').value = c.canary_timeout || 5;
+      document.getElementById('cfg-max-body-mb').value = c.max_replay_body_mb || 0;
+      document.getElementById('cfg-fail-codes').value = (c.canary_fail_codes || []).join(',');
+      document.getElementById('cfg-verbose').checked = !!c.verbose;
+      document.getElementById('cfg-verbose-label').textContent = c.verbose ? 'On' : 'Off';
+      document.getElementById('cfg-block-log').value = c.block_log || '';
+    } catch (e) { toast('Failed to load config'); }
+  }
+
+  document.getElementById('btn-config-save').addEventListener('click', async function() {
+    var p = {};
+    var bu = document.getElementById('cfg-backend-url').value.trim();
+    if (bu) p.backend_url = bu;
+    var to = parseFloat(document.getElementById('cfg-canary-timeout').value);
+    if (to > 0) p.canary_timeout = to;
+    p.max_replay_body_mb = parseFloat(document.getElementById('cfg-max-body-mb').value) || 0;
+    var codes = document.getElementById('cfg-fail-codes').value.split(',').map(function(s) { return parseInt(s.trim()); }).filter(function(n) { return !isNaN(n); });
+    if (codes.length > 0) p.canary_fail_codes = codes;
+    p.verbose = document.getElementById('cfg-verbose').checked;
+    try {
+      var resp = await fetch(apiBase() + '/__sentinel/admin/config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p)
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      toast('Configuration saved'); await fetchConfig();
+    } catch (e) { toast('Save failed: ' + e.message); }
+  });
+  document.getElementById('btn-config-reload').addEventListener('click', function() { fetchConfig(); toast('Config reloaded'); });
+
+  // Start
+  fetchCanaries(); fetchMetrics();
+  refreshTimer = setInterval(function() { fetchCanaries(); fetchMetrics(); }, 5000);
+})();
+</script>
+</body>
+</html>

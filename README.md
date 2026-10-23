@@ -46,7 +46,7 @@ If you want to eliminate this bypass entirely, set `SENTINEL_MAX_REPLAY_BODY=0` 
 ## Features
 
 - **Multi-version canary array** — ships with 11 PHP versions (5.6 through 8.4), all running in parallel
-- **Admin API + dashboard** — enable/disable canaries at runtime, view health and attack metrics
+- **Admin API + built-in dashboard** — enable/disable canaries at runtime, view health and attack metrics at `/__sentinel/dashboard`
 - **Zero false negatives** — the canary fails on exactly the same inputs as production
 - **Block logging** — every blocked request is logged with full headers and body preview (JSONL)
 - **Per-canary metrics** — errors, timeouts, and crashes tracked per PHP version
@@ -71,6 +71,9 @@ curl http://localhost:8080/__sentinel/health
 
 # Admin API — list all canaries
 curl http://localhost:8080/__sentinel/admin/canaries
+
+# Open the dashboard
+# → http://localhost:8080/__sentinel/dashboard
 ```
 
 ### Building Individual Canary Images

@@ -277,11 +277,27 @@ class SentinelProxy:
 
         return self._cors(web.json_response({"error": "Not found"}, status=404))
 
+    async def _serve_dashboard(self, request: web.Request) -> web.Response:
+        dashboard_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard", "index.html"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dashboard", "index.html"),
+            "/app/dashboard/index.html",
+        ]
+        for p in dashboard_paths:
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    html = f.read()
+                return web.Response(text=html, content_type="text/html")
+        return web.Response(text="Dashboard not found. Place dashboard/index.html in the project root.", status=404)
+
     async def handle(self, request: web.Request) -> web.StreamResponse:
         path = request.path_qs
 
         if path.startswith("/__sentinel/admin/"):
             return await self._handle_admin(request, path)
+
+        if path == "/__sentinel/dashboard" or path == "/__sentinel/dashboard/":
+            return await self._serve_dashboard(request)
 
         self.metrics.total_requests += 1
         client_ip = request.remote or "unknown"
