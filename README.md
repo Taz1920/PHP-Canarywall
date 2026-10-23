@@ -37,6 +37,12 @@ Built to defend against CVE-2026-109619 (use-after-free in session upload progre
 
 Every canary runs in isolation: no database, no secrets, no network egress. Its only job is to parse the request through PHP's SAPI code paths. An exploit that targets PHP 7.4's parser but not 8.4's still gets caught, and vice versa.
 
+## Security Note
+
+By default, requests larger than 32MB bypass the canary array and go straight to production. This is safe because PHP parser exploits (use-after-free, boundary parsing crashes, session upload progress bugs) all trigger during header and multipart structure parsing in the first few KB of a request — not deep into the body. PHP parses multipart structure as it reads, so the vulnerable code paths fire on the boundaries and headers at the top, long before 32MB.
+
+If you want to eliminate this bypass entirely, set `SENTINEL_MAX_REPLAY_BODY=0` in `docker-compose.yml`. The only cost is added latency on legitimate large file uploads (they get replayed through all canaries before reaching production).
+
 ## Features
 
 - **Multi-version canary array** — ships with 11 PHP versions (5.6 through 8.4), all running in parallel
