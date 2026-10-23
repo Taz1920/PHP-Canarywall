@@ -501,10 +501,12 @@ async def run_suite(target: str, workers: int, flood_rps: int, flood_duration: i
             print(f"  Error breakdown: {error_types}")
 
     # Final metrics from Sentinel
+    admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
     print(f"\nSentinel metrics after test:")
     try:
+        headers = {"X-Sentinel-Key": admin_key} if admin_key else {}
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{target}/__sentinel/metrics", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            async with session.get(f"{target}/__sentinel/metrics", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 metrics = await resp.json()
                 for k, v in metrics.items():
                     print(f"  {k}: {v}")
