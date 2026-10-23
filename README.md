@@ -112,7 +112,32 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_CANARY_TIMEOUT` | `5` | Seconds to wait for canary response |
 | `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay (32MB). Larger requests bypass canaries. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
+| `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |
+
+## Authentication
+
+The admin API, dashboard, and metrics endpoints are all protected by an API key. Set your key in the environment:
+
+```bash
+# Option 1: Set in docker-compose.yml or .env file
+SENTINEL_ADMIN_KEY=your-secret-key-here
+
+# Option 2: Let Sentinel generate a random key (check the logs)
+docker logs php-sentinel 2>&1 | grep ADMIN_KEY
+```
+
+The dashboard at `/__sentinel/dashboard` will prompt you for the key on first visit. For API calls, pass the key via header or query parameter:
+
+```bash
+# Header (recommended)
+curl -H "X-Sentinel-Key: your-key" http://localhost:8080/__sentinel/admin/canaries
+
+# Query parameter
+curl http://localhost:8080/__sentinel/metrics?key=your-key
+```
+
+The health endpoint (`/__sentinel/health`) remains public for load balancer health checks.
 
 ## Admin API
 

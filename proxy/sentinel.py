@@ -18,6 +18,8 @@ import os
 import sys
 import signal
 import json
+import secrets
+import hmac
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -41,6 +43,7 @@ class SentinelConfig:
     log_file: str = ""
     block_log: str = "/var/log/sentinel/blocked.jsonl"
     verbose: bool = False
+    admin_key: str = ""
 
     @classmethod
     def from_env(cls) -> "SentinelConfig":
@@ -59,6 +62,12 @@ class SentinelConfig:
         cfg.log_file = os.getenv("SENTINEL_LOG_FILE", cfg.log_file)
         cfg.block_log = os.getenv("SENTINEL_BLOCK_LOG", cfg.block_log)
         cfg.verbose = os.getenv("SENTINEL_VERBOSE", "").lower() in ("1", "true", "yes")
+        cfg.admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
+        if not cfg.admin_key:
+            cfg.admin_key = secrets.token_urlsafe(32)
+            cfg._admin_key_generated = True
+        else:
+            cfg._admin_key_generated = False
         return cfg
 
 
@@ -169,6 +178,21 @@ class SentinelProxy:
         except Exception:
             return "unreachable"
 
+    def _check_auth(self, request: web.Request) -> bool:
+        key = request.headers.get("X-Sentinel-Key", "")
+        if not key:
+            key = request.query.get("key", "")
+        if not key:
+            return False
+        return hmac.compare_digest(key, self.cfg.admin_key)
+
+    @staticmethod
+    def _unauthorized() -> web.Response:
+        return web.json_response(
+            {"error": "Unauthorized. Provide SENTINEL_ADMIN_KEY via X-Sentinel-Key header or ?key= query param."},
+            status=401,
+        )
+
     @staticmethod
     def _cors(resp: web.Response) -> web.Response:
         resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -179,6 +203,8 @@ class SentinelProxy:
     async def _handle_admin(self, request: web.Request, path: str) -> web.Response:
         if request.method == "OPTIONS":
             return self._cors(web.Response(status=204))
+        if not self._check_auth(request):
+            return self._cors(self._unauthorized())
         if path == "/__sentinel/admin/canaries" and request.method == "GET":
             canaries = []
             health_tasks = {name: self._check_canary_health(name) for name in self.canary_names}
@@ -303,8 +329,10 @@ class SentinelProxy:
         client_ip = request.remote or "unknown"
 
         if path == "/__sentinel/health":
-            return self._cors(web.json_response({"status": "ok", **self.metrics.to_dict()}))
+            return self._cors(web.json_response({"status": "ok"}))
         if path == "/__sentinel/metrics":
+            if not self._check_auth(request):
+                return self._cors(self._unauthorized())
             return self._cors(web.json_response(self.metrics.to_dict()))
 
         if self.cfg.verbose:
@@ -518,6 +546,14 @@ async def run():
         f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
         f"canaries={cfg.canary_urls}  backend={cfg.backend_url}"
     )
+    if getattr(cfg, '_admin_key_generated', False):
+        logger.warning(
+            f"No SENTINEL_ADMIN_KEY set — generated random key for this session:\n"
+            f"  SENTINEL_ADMIN_KEY={cfg.admin_key}\n"
+            f"  Set this in docker-compose.yml to keep the same key across restarts."
+        )
+    else:
+        logger.info("Admin API authentication enabled (SENTINEL_ADMIN_KEY is set)")
 
     app = web.Application(client_max_size=cfg.max_replay_body or 100 * 1024 * 1024)
     app.router.add_route("*", "/{path_info:.*}", proxy.handle)

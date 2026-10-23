@@ -20,6 +20,7 @@ import aiohttp
 
 
 TARGET = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080"
+ADMIN_KEY = os.getenv("SENTINEL_ADMIN_KEY", "")
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -169,8 +170,9 @@ async def main():
 
     # Final metrics
     print(f"\n  --- Final Sentinel Metrics ---\n")
+    headers = {"X-Sentinel-Key": ADMIN_KEY} if ADMIN_KEY else {}
     async with aiohttp.ClientSession() as s:
-        async with s.get(f"{TARGET}/__sentinel/metrics", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+        async with s.get(f"{TARGET}/__sentinel/metrics", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             import json
             metrics = await resp.json()
             print(f"  Total requests:   {metrics['total_requests']}")

@@ -48,17 +48,35 @@
 }
 body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-height: 100vh; }
 * { box-sizing: border-box; }
+
+/* Login overlay */
+.login-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.login-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 40px; max-width: 400px; width: 100%; text-align: center; }
+.login-box .shield-big { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; background: var(--accent-glow); border: 1px solid var(--accent); margin-bottom: 20px; }
+.login-box .shield-big svg { width: 28px; height: 28px; }
+.login-box h2 { font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; font-weight: 700; margin: 0 0 6px; }
+.login-box .sub { font-size: 0.82rem; color: var(--fg-dim); margin-bottom: 24px; }
+.login-box input[type="password"] { font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; margin-bottom: 12px; }
+.login-box input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.login-box .login-error { font-size: 0.78rem; color: var(--red); margin-bottom: 12px; min-height: 1.2em; }
+.login-box .btn-login { font-family: 'Inter', system-ui, sans-serif; font-size: 0.88rem; font-weight: 600; padding: 10px 24px; border-radius: 8px; border: none; background: var(--accent); color: #fff; cursor: pointer; width: 100%; transition: opacity 0.15s; }
+.login-box .btn-login:hover { opacity: 0.85; }
+.login-box .hint { font-size: 0.7rem; color: var(--fg-muted); margin-top: 16px; line-height: 1.5; }
+.login-box .hint code { font-family: 'JetBrains Mono', monospace; background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 0.68rem; }
+
 .header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 24px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .header h1 { font-family: 'JetBrains Mono', monospace; font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
 .header h1 .shield { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--accent-glow); border: 1px solid var(--accent); }
 .header h1 .shield svg { width: 18px; height: 18px; }
-.header-right { display: flex; align-items: center; gap: 16px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
 .status-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding: 5px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
 .status-badge.online { background: var(--green-dim); color: var(--green); }
 .status-badge.offline { background: var(--red-dim); color: var(--red); }
 .status-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status-badge.online .dot { animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.btn-logout { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 500; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg-dim); cursor: pointer; transition: all 0.15s; }
+.btn-logout:hover { border-color: var(--red); color: var(--red); }
 .metrics-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
 .metric-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .metric-tile .label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-dim); margin-bottom: 6px; }
@@ -121,6 +139,26 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 </head>
 <body>
 
+<!-- Login overlay -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box">
+    <div class="shield-big">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+    </div>
+    <h2>PHP Sentinel</h2>
+    <p class="sub">Enter your admin key to access the dashboard</p>
+    <input type="password" id="login-key" placeholder="SENTINEL_ADMIN_KEY" autocomplete="off" spellcheck="false">
+    <div class="login-error" id="login-error"></div>
+    <button class="btn-login" id="btn-login">Authenticate</button>
+    <p class="hint">Find your key in the container logs:<br><code>docker logs php-sentinel 2>&amp;1 | grep ADMIN_KEY</code></p>
+  </div>
+</div>
+
+<!-- Main dashboard (hidden until authenticated) -->
+<div id="app" style="display:none">
+
 <div class="header">
   <h1>
     <span class="shield">
@@ -135,6 +173,7 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
       <span class="dot"></span>
       <span>Offline</span>
     </div>
+    <button class="btn-logout" id="btn-logout">Logout</button>
   </div>
 </div>
 
@@ -211,10 +250,17 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
   <span class="endpoint" id="footer-endpoint"></span>
 </div>
 
+</div><!-- /app -->
+
 <div class="toast" id="toast"></div>
 
 <script>
 (function() {
+  var loginOverlay = document.getElementById('login-overlay');
+  var loginKeyInput = document.getElementById('login-key');
+  var loginError = document.getElementById('login-error');
+  var btnLogin = document.getElementById('btn-login');
+  var appEl = document.getElementById('app');
   var connStatus = document.getElementById('conn-status');
   var grid = document.getElementById('canary-grid');
   var countEl = document.getElementById('canary-count');
@@ -223,8 +269,76 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
   var canaries = [];
   var refreshTimer = null;
   var toastTimer = null;
+  var adminKey = '';
 
-  function apiBase() { return ''; }
+  function getStoredKey() {
+    try { return localStorage.getItem('sentinel_admin_key') || ''; } catch(e) { return ''; }
+  }
+  function setStoredKey(k) {
+    try { localStorage.setItem('sentinel_admin_key', k); } catch(e) {}
+  }
+  function clearStoredKey() {
+    try { localStorage.removeItem('sentinel_admin_key'); } catch(e) {}
+  }
+
+  function authHeaders(extra) {
+    var h = { 'X-Sentinel-Key': adminKey };
+    if (extra) { for (var k in extra) h[k] = extra[k]; }
+    return h;
+  }
+
+  function showLogin(msg) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+    appEl.style.display = 'none';
+    loginOverlay.style.display = 'flex';
+    loginError.textContent = msg || '';
+    loginKeyInput.value = '';
+    loginKeyInput.focus();
+  }
+
+  function showApp() {
+    loginOverlay.style.display = 'none';
+    appEl.style.display = 'block';
+    startPolling();
+  }
+
+  async function tryAuth(key) {
+    try {
+      var resp = await fetch('/__sentinel/admin/canaries', { headers: { 'X-Sentinel-Key': key } });
+      if (resp.status === 401) return false;
+      if (!resp.ok) return false;
+      return true;
+    } catch(e) { return false; }
+  }
+
+  btnLogin.addEventListener('click', async function() {
+    var key = loginKeyInput.value.trim();
+    if (!key) { loginError.textContent = 'Enter your admin key'; return; }
+    btnLogin.textContent = 'Authenticating...';
+    btnLogin.disabled = true;
+    var ok = await tryAuth(key);
+    btnLogin.textContent = 'Authenticate';
+    btnLogin.disabled = false;
+    if (ok) {
+      adminKey = key;
+      setStoredKey(key);
+      showApp();
+    } else {
+      loginError.textContent = 'Invalid key or Sentinel unreachable';
+      loginKeyInput.select();
+    }
+  });
+
+  loginKeyInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') btnLogin.click();
+  });
+
+  document.getElementById('btn-logout').addEventListener('click', function() {
+    adminKey = '';
+    clearStoredKey();
+    showLogin();
+  });
 
   function toast(msg) {
     toastEl.textContent = msg;
@@ -243,7 +357,8 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 
   async function fetchCanaries() {
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries');
+      var resp = await fetch('/__sentinel/admin/canaries', { headers: authHeaders() });
+      if (resp.status === 401) { showLogin('Session expired — please re-authenticate'); return; }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       var data = await resp.json();
       canaries = data.canaries || [];
@@ -257,7 +372,8 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 
   async function fetchMetrics() {
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/metrics');
+      var resp = await fetch('/__sentinel/metrics', { headers: authHeaders() });
+      if (resp.status === 401) return;
       if (!resp.ok) return;
       var m = await resp.json();
       document.getElementById('m-total').textContent = m.total_requests;
@@ -308,7 +424,8 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 
   async function toggleCanary(name, action) {
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries/' + name + '/' + action, { method: 'POST' });
+      var resp = await fetch('/__sentinel/admin/canaries/' + name + '/' + action, { method: 'POST', headers: authHeaders() });
+      if (resp.status === 401) { showLogin('Session expired'); return; }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       toast(name + ' ' + action + 'd');
       await fetchCanaries();
@@ -317,10 +434,11 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 
   async function bulkSet(list) {
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/admin/canaries/bulk', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      var resp = await fetch('/__sentinel/admin/canaries/bulk', {
+        method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ enabled: list })
       });
+      if (resp.status === 401) { showLogin('Session expired'); return; }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       await fetchCanaries();
     } catch (e) { toast('Failed: ' + e.message); }
@@ -339,7 +457,6 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
     fetchCanaries(); fetchMetrics(); toast('Refreshed');
   });
 
-  // Config panel
   var configPanel = document.getElementById('config-panel');
   var configToggleBtn = document.getElementById('btn-config-toggle');
   configToggleBtn.addEventListener('click', function() {
@@ -352,7 +469,8 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 
   async function fetchConfig() {
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/admin/config');
+      var resp = await fetch('/__sentinel/admin/config', { headers: authHeaders() });
+      if (resp.status === 401) { showLogin('Session expired'); return; }
       if (!resp.ok) return;
       var c = (await resp.json()).config;
       document.getElementById('cfg-backend-url').value = c.backend_url || '';
@@ -376,19 +494,34 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
     if (codes.length > 0) p.canary_fail_codes = codes;
     p.verbose = document.getElementById('cfg-verbose').checked;
     try {
-      var resp = await fetch(apiBase() + '/__sentinel/admin/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      var resp = await fetch('/__sentinel/admin/config', {
+        method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(p)
       });
+      if (resp.status === 401) { showLogin('Session expired'); return; }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       toast('Configuration saved'); await fetchConfig();
     } catch (e) { toast('Save failed: ' + e.message); }
   });
   document.getElementById('btn-config-reload').addEventListener('click', function() { fetchConfig(); toast('Config reloaded'); });
 
-  // Start
-  fetchCanaries(); fetchMetrics();
-  refreshTimer = setInterval(function() { fetchCanaries(); fetchMetrics(); }, 5000);
+  function startPolling() {
+    fetchCanaries(); fetchMetrics();
+    clearInterval(refreshTimer);
+    refreshTimer = setInterval(function() { fetchCanaries(); fetchMetrics(); }, 5000);
+  }
+
+  // Boot: check for stored key
+  var stored = getStoredKey();
+  if (stored) {
+    adminKey = stored;
+    tryAuth(stored).then(function(ok) {
+      if (ok) showApp();
+      else { clearStoredKey(); showLogin('Stored key is no longer valid'); }
+    });
+  } else {
+    showLogin();
+  }
 })();
 </script>
 </body>
