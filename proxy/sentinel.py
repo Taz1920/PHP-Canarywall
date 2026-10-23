@@ -325,15 +325,15 @@ class SentinelProxy:
         if path == "/__sentinel/dashboard" or path == "/__sentinel/dashboard/":
             return await self._serve_dashboard(request)
 
-        self.metrics.total_requests += 1
-        client_ip = request.remote or "unknown"
-
         if path == "/__sentinel/health":
             return self._cors(web.json_response({"status": "ok"}))
         if path == "/__sentinel/metrics":
             if not self._check_auth(request):
                 return self._cors(self._unauthorized())
             return self._cors(web.json_response(self.metrics.to_dict()))
+
+        self.metrics.total_requests += 1
+        client_ip = request.remote or "unknown"
 
         if self.cfg.verbose:
             self.log.debug(f"REQ {client_ip} {request.method} {path}")
