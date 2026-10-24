@@ -3,8 +3,9 @@
 PHP Sentinel — Stress Test Suite
 
 Sends crafted payloads that target the PHP SAPI parsing code paths
-CVE-2026-109619 (session upload progress use-after-free) and related
-multipart/header parsing bugs live in. Run against your local Sentinel
+CVE-2026-109618 (OOM corruption) and CVE-2026-109619 (cross-request
+use-after-free) share — the session upload progress handler and
+related multipart/header parsing. Run against your local Sentinel
 stack to verify it catches what it should and forwards what it shouldn't.
 
 Usage:
@@ -148,10 +149,11 @@ def payload_many_tiny_parts() -> dict:
 
 
 # ── 2. Session upload progress attacks ─────────────────────────────
-# CVE-2026-109619 lives in the session upload progress handler.  It fires
-# when a multipart POST includes both a session cookie and a field whose
-# name matches session.upload_progress.name.  The UAF triggers during
-# the cleanup/finalization of the upload progress data structure.
+# Both CVE-2026-109618 and CVE-2026-109619 are triggered through the
+# session upload progress handler.  It fires when a multipart POST
+# includes both a session cookie and a field whose name matches
+# session.upload_progress.name.  109618 corrupts memory during OOM
+# cleanup; 109619 is a cross-request use-after-free.
 
 def payload_session_upload_progress_basic() -> dict:
     """Standard session upload progress trigger — the exact CVE vector."""
