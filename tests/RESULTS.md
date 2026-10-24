@@ -130,7 +130,15 @@ Upload-progress filter disabled to verify the canary array catches real exploit 
 
 **Key finding:** The eness PoC's stage 1 heap leak payloads caused **real PHP-FPM worker crashes (HTTP 502)** across all 11 canary versions. These are actual parser-level crashes from real CVE exploit payloads, not simulated failures. The canary array detected and blocked them without the upload-progress filter.
 
-**CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request. The exploit also requires `display_errors=On`, single Apache prefork worker, and mod_php — all conditions Sentinel's FPM-based canary architecture defeats. No code execution was achieved under either configuration.
+**CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request.
+
+**Positive control caveat:** The cozybear PoC's heap calibration is tuned for native Linux Docker and did not achieve full RCE on the Docker Desktop/WSL2 test environment (stage 1 heap leak fails — the bug triggers and workers crash, but the pointer spray doesn't land consistently). Without a confirmed RCE without Sentinel, we can only claim that Sentinel **blocks the attack vector** (every cozybear request is caught by the upload-progress filter or crashes canaries), not that it **stopped a working RCE**. The cozybear README documents successful RCE on native Linux Docker with the pinned `php:8.4.26-apache` image. Reproducing Test 0 (positive control) on native Linux Docker is needed to close this gap.
+
+**What we did verify:**
+- The stale-session bug fires: `zend_mm_heap corrupted` on every exploit attempt, Apache workers abort (SIGABRT)
+- The Set-Cookie leak channel works: 4KB of heap data in the cookie, valid user-space pointers present
+- Every cozybear request contains `PHP_SESSION_UPLOAD_PROGRESS` and is caught by both detection layers
+- The exploit also requires `display_errors=On`, single Apache prefork worker, and mod_php — conditions Sentinel's FPM-based canary architecture does not provide
 
 **Post-test verification:** Backend container inspected after all exploit runs. No `rce_proof.txt`, no injected code, no compromised processes. Empty session files (0 bytes) from exploit session rotation were cleaned up. All canaries clean — no session files or artifacts.
 
@@ -206,25 +214,70 @@ The cozybear exploit is the only public working RCE for CVE-2026-109619.
 It sends `PHP_SESSION_UPLOAD_PROGRESS` in every request, so both the
 upload-progress filter and the canary OOM tripwire can catch it independently.
 
+**PoC version tested:** `cozybear/cve-2026-109619` commit `7a73bb5`
+
 **Prerequisites:**
-- Clone `cozybear/cve-2026-109619` (the PoC repo)
+- Clone `cozybear/cve-2026-109619` and checkout `7a73bb5`
+- **Native Linux Docker** (Docker Desktop/WSL2 changes the heap layout
+  enough that the exploit's stage 1 heap leak fails — the bug triggers
+  but the pointer spray doesn't land)
 - Sentinel stack running (`docker compose up -d`)
 - Python 3 with `requests` installed
+
+**Test 0 — positive control (exploit WITHOUT Sentinel):**
+
+This must succeed before Tests 1–2 mean anything. If the exploit can't
+get RCE without Sentinel, blocking it proves nothing.
+
+```bash
+# Start the cozybear lab (vulnerable PHP 8.4.26 + patched 8.4.27)
+cd /path/to/cozybear/cve-2026-109619
+docker compose up --build --abort-on-container-exit --exit-code-from attacker
+
+# Expected output (on native Linux Docker):
+#   [+] Zend MM chunk base = 0x...
+#   [+] libphp base = 0x...
+#   [+] executed on attempt 1
+#   PROOF: uid=33(www-data) gid=33(www-data) groups=33(www-data)
+#   RESULT: CONFIRMED
+#
+# If this prints INCONCLUSIVE or heap leak failed, the exploit doesn't
+# work in your environment and Tests 1–2 cannot validate Sentinel's
+# protection against a working RCE.
+
+# Verify the proof file exists
+docker compose exec vuln cat /out/p
+# Should print: uid=33(www-data) ...
+```
 
 **Test 1 — upload-progress filter ON (default):**
 
 ```bash
-# Ensure filter is enabled (this is the default)
-# SENTINEL_BLOCK_UPLOAD_PROGRESS=true in .env
+# Connect the cozybear vulnerable target to Sentinel's network
+docker network connect php-sentinel_sentinel-net cve-2026-109619-vuln-1
+
+# Point Sentinel at the vulnerable target
+# Set SENTINEL_BACKEND_URL=http://cve-2026-109619-vuln-1:80 in .env
+docker compose up -d sentinel   # recreate to pick up change
+
+# Clear the block log and proof file
+docker exec php-sentinel python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
+docker compose -f /path/to/cozybear/compose.yaml exec vuln rm -f /out/p
 
 # Run the exploit against Sentinel's public port
-cd /path/to/cozybear/cve-2026-109619
-python3 exploit.py --target http://localhost:8080/index.php
+python3 attacker/exploit.py \
+    -u http://localhost:8080/index.php \
+    --proof /dev/null \
+    --cmd 'id>/out/p'
 
-# Expected: exploit fails — all requests return 403
+# Expected: exploit fails — all requests return 403 or connection reset
 # Check the block log:
 docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl
 # Every entry should show "upload_progress_blocked"
+
+# Verify no RCE proof
+docker compose -f /path/to/cozybear/compose.yaml exec vuln cat /out/p
+# Should fail: file does not exist
 ```
 
 **Test 2 — upload-progress filter OFF (canary-only detection):**
@@ -234,30 +287,33 @@ docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl
 # Set SENTINEL_BLOCK_UPLOAD_PROGRESS=false in .env
 docker compose up -d sentinel   # recreate to pick up change
 
+# Clear the block log and proof file
+docker exec php-sentinel python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
+docker compose -f /path/to/cozybear/compose.yaml exec vuln rm -f /out/p
+
 # Run the exploit again
-python3 exploit.py --target http://localhost:8080/index.php
+python3 attacker/exploit.py \
+    -u http://localhost:8080/index.php \
+    --proof /dev/null \
+    --cmd 'id>/out/p'
 
 # Expected: exploit fails — canaries crash (502), Sentinel returns 403
 # The block log entries will show killed canaries instead of
 # "upload_progress_blocked"
+
+# Verify no RCE proof
+docker compose -f /path/to/cozybear/compose.yaml exec vuln cat /out/p
+# Should fail: file does not exist
 
 # Re-enable the filter when done
 # Set SENTINEL_BLOCK_UPLOAD_PROGRESS=true in .env
 docker compose up -d sentinel
 ```
 
-**What to verify after each run:**
-
-```bash
-# No RCE proof file on the backend
-docker exec <backend-container> ls /tmp/rce_proof.txt    # should not exist
-docker exec <backend-container> ls /var/www/html/rce_proof.txt
-
-# Block log has entries for every exploit request
-docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl | wc -l
-
-# Canaries are still healthy
-docker exec php-sentinel python3 -c \
-  "import json,urllib.request as u; \
-   print(json.loads(u.urlopen('http://localhost:8080/__sentinel/health').read()))"
-```
+**Current status:** Test 0 has not been run on native Linux Docker.
+On Docker Desktop/WSL2, the exploit triggers the bug (heap corruption,
+worker crashes) but the heap leak stage fails due to different heap
+layout, so full RCE was not achieved in either direction. Tests 1–2
+confirmed that Sentinel blocks every cozybear request via both detection
+layers, but the positive control gap means we can only claim Sentinel
+blocks the attack vector, not that it stopped a confirmed working RCE.
