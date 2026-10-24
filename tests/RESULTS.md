@@ -132,17 +132,33 @@ Upload-progress filter disabled to verify the canary array catches real exploit 
 
 **CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request.
 
-**Positive control (Test 0) — CONFIRMED:** The cozybear PoC achieves reliable RCE on the pinned `php:8.4.26-apache` image under Docker Desktop (WSL2, x86_64). Test 0 output:
+**Positive control (Test 0) — CONFIRMED:** The cozybear PoC achieves reliable RCE on the pinned `php:8.4.26-apache` image. Verified on both native Linux Docker and Docker Desktop (WSL2, x86_64).
+
+Native Linux Docker output (stock exploit, unmodified):
 
 ```
-[+] Zend MM chunk base = 0x7c9ced400000
-[+] libphp base = 0x7c9cef005000
+[+] Zend MM chunk base = 0x7194f7c00000
+[+] libphp base = 0x7194f98f0000
 [+] executed on attempt 1
 PROOF: uid=33(www-data) gid=33(www-data) groups=33(www-data)
 RESULT: CONFIRMED
   PHP 8.4.26: code execution as the Apache worker
   PHP 8.4.27: no code execution (patched)
 ```
+
+Vulnerable target logs (native Linux Docker):
+
+```
+vuln-1  | zend_mm_heap corrupted
+vuln-1  | [core:notice] child pid 19 exit signal Abort (6)
+vuln-1  | zend_mm_heap corrupted
+vuln-1  | [core:notice] child pid 266 exit signal Abort (6)
+vuln-1  | zend_mm_heap corrupted
+vuln-1  | [core:notice] child pid 274 exit signal Abort (6)
+vuln-1  | [core:notice] child pid 282 exit signal Segmentation fault (11)
+```
+
+Patched target logs (native Linux Docker): All requests return 200, no heap corruption, no crashes.
 
 The exploit completes the full 3-stage chain (heap leak → libphp leak → forged HashTable → `zif_system`) and writes a proof file as `www-data`. The patched PHP 8.4.27 correctly rejects the exploit at stage 1 (heap leak fails). This confirms that Sentinel **stopped a working RCE**, not just blocked an untested attack vector.
 
@@ -327,9 +343,10 @@ docker compose -f /path/to/cozybear/compose.yaml exec vuln cat /out/p
 docker compose up -d sentinel
 ```
 
-**Current status:** Test 0 CONFIRMED on Docker Desktop (WSL2, x86_64)
-with Docker 29.5.3, kernel 6.6.87.2-microsoft-standard-WSL2. The
-exploit achieves full RCE on PHP 8.4.26 (code execution as www-data)
-and correctly fails on patched PHP 8.4.27. Tests 1–2 confirmed that
-Sentinel blocks every cozybear request via both detection layers,
-preventing RCE that is proven to work without Sentinel.
+**Current status:** Test 0 CONFIRMED on native Linux Docker (stock
+exploit, all 3 stages succeeded on attempt 1) and Docker Desktop
+(WSL2, x86_64). The exploit achieves full RCE on PHP 8.4.26 (code
+execution as www-data) and correctly fails on patched PHP 8.4.27.
+Tests 1–2 confirmed that Sentinel blocks every cozybear request via
+both detection layers, preventing RCE that is proven to work without
+Sentinel.
