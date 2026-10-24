@@ -178,7 +178,8 @@ class SentinelProxy:
         timeout = aiohttp.ClientTimeout(total=self.cfg.canary_timeout)
         self._canary_session = aiohttp.ClientSession(timeout=timeout)
         self._backend_session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=300)
+            timeout=aiohttp.ClientTimeout(total=300),
+            auto_decompress=False,
         )
         block_dir = os.path.dirname(self.cfg.block_log)
         if block_dir:

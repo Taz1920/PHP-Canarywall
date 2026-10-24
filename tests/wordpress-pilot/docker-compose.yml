@@ -1,0 +1,34 @@
+services:
+  wordpress:
+    image: wordpress:6.4-php8.1-apache
+    container_name: sentinel-wp
+    environment:
+      WORDPRESS_DB_HOST: wpdb
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp
+      WORDPRESS_DB_NAME: wp
+    depends_on:
+      wpdb:
+        condition: service_healthy
+    networks:
+      - wp-net
+
+  wpdb:
+    image: mariadb:10.11
+    container_name: sentinel-wpdb
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wp
+      MYSQL_USER: wp
+      MYSQL_PASSWORD: wp
+    healthcheck:
+      test: ["CMD", "mariadb", "-u", "wp", "-pwp", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - wp-net
+
+networks:
+  wp-net:
+    driver: bridge
