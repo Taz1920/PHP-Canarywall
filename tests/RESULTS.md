@@ -130,7 +130,7 @@ Upload-progress filter disabled to verify the canary array catches real exploit 
 
 **Key finding:** The eness PoC's stage 1 heap leak payloads caused **real PHP-FPM worker crashes (HTTP 502)** across all 11 canary versions. These are actual parser-level crashes from real CVE exploit payloads, not simulated failures. The canary array detected and blocked them without the upload-progress filter.
 
-**CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request.
+**CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the upload-progress attack surface used by all known public exploits for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request.
 
 **Positive control (Test 0) — CONFIRMED:** The cozybear PoC achieves reliable RCE on the pinned `php:8.4.26-apache` image. Verified on both native Linux Docker and Docker Desktop (WSL2, x86_64).
 
@@ -207,7 +207,7 @@ BLOCKED POST /index.php — killed: [canary-84, ..., canary-56]
 
 ## What These Tests Cover
 
-- **Upload-progress filter:** Deterministic blocking of `PHP_SESSION_UPLOAD_PROGRESS` multipart payloads (CVE-2026-109618/109619 shared attack surface)
+- **Upload-progress filter:** Deterministic blocking of `PHP_SESSION_UPLOAD_PROGRESS` multipart payloads (used by CVE-2026-109618 and all known public CVE-2026-109619 exploits; CVE-2026-109619 has other confirmed trigger paths not covered by this filter)
 - **Canary crash detection:** Worker SIGKILL, OOM, and timeout detection across all 11 PHP versions
 - **Memory pressure:** Bodies exceeding canary `memory_limit=16M` trigger OOM and block
 - **Concurrency:** Multiple simultaneous attacks don't bypass the canary array
