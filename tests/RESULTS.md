@@ -214,10 +214,10 @@ The cozybear exploit is the only public working RCE for CVE-2026-109619.
 It sends `PHP_SESSION_UPLOAD_PROGRESS` in every request, so both the
 upload-progress filter and the canary OOM tripwire can catch it independently.
 
-**PoC version tested:** `cozybear/cve-2026-109619` commit `7a73bb5`
+**PoC version tested:** [`Taz1920/cve-2026-109619`](https://github.com/Taz1920/cve-2026-109619) commit `7a73bb5`
 
 **Prerequisites:**
-- Clone `cozybear/cve-2026-109619` and checkout `7a73bb5`
+- Clone [`Taz1920/cve-2026-109619`](https://github.com/Taz1920/cve-2026-109619) and checkout `7a73bb5`
 - **Native Linux Docker** (Docker Desktop/WSL2 changes the heap layout
   enough that the exploit's stage 1 heap leak fails — the bug triggers
   but the pointer spray doesn't land)
