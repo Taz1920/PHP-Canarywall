@@ -191,4 +191,73 @@ python tests/stress_test.py
 
 # Stress test with longer flood
 python tests/stress_test.py --flood-duration 30
+
+# WordPress false-positive pilot (requires WordPress stack running —
+# see tests/wordpress-pilot/docker-compose.yml)
+python tests/wordpress-pilot/crawl_wordpress.py
+
+# Attack simulation (CVE-2026-109618 + canary OOM tripwire)
+python tests/wordpress-pilot/attack_test.py
+```
+
+### Reproducing the cozybear/cve-2026-109619 PoC results
+
+The cozybear exploit is the only public working RCE for CVE-2026-109619.
+It sends `PHP_SESSION_UPLOAD_PROGRESS` in every request, so both the
+upload-progress filter and the canary OOM tripwire can catch it independently.
+
+**Prerequisites:**
+- Clone `cozybear/cve-2026-109619` (the PoC repo)
+- Sentinel stack running (`docker compose up -d`)
+- Python 3 with `requests` installed
+
+**Test 1 — upload-progress filter ON (default):**
+
+```bash
+# Ensure filter is enabled (this is the default)
+# SENTINEL_BLOCK_UPLOAD_PROGRESS=true in .env
+
+# Run the exploit against Sentinel's public port
+cd /path/to/cozybear/cve-2026-109619
+python3 exploit.py --target http://localhost:8080/index.php
+
+# Expected: exploit fails — all requests return 403
+# Check the block log:
+docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl
+# Every entry should show "upload_progress_blocked"
+```
+
+**Test 2 — upload-progress filter OFF (canary-only detection):**
+
+```bash
+# Disable the filter to test canary detection alone
+# Set SENTINEL_BLOCK_UPLOAD_PROGRESS=false in .env
+docker compose up -d sentinel   # recreate to pick up change
+
+# Run the exploit again
+python3 exploit.py --target http://localhost:8080/index.php
+
+# Expected: exploit fails — canaries crash (502), Sentinel returns 403
+# The block log entries will show killed canaries instead of
+# "upload_progress_blocked"
+
+# Re-enable the filter when done
+# Set SENTINEL_BLOCK_UPLOAD_PROGRESS=true in .env
+docker compose up -d sentinel
+```
+
+**What to verify after each run:**
+
+```bash
+# No RCE proof file on the backend
+docker exec <backend-container> ls /tmp/rce_proof.txt    # should not exist
+docker exec <backend-container> ls /var/www/html/rce_proof.txt
+
+# Block log has entries for every exploit request
+docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl | wc -l
+
+# Canaries are still healthy
+docker exec php-sentinel python3 -c \
+  "import json,urllib.request as u; \
+   print(json.loads(u.urlopen('http://localhost:8080/__sentinel/health').read()))"
 ```
