@@ -4,9 +4,9 @@ Tests CVE-2026-109618 (upload progress OOM injection) via the upload-progress
 filter, and generic canary-kill payloads via the canary OOM tripwire.
 
 Note: CVE-2026-109619 (stale global UAF) requires a multi-stage RCE chain
-that is tested separately by the stress_test.py cozybear harness.  The canary
-OOM tests here confirm the fail-closed mechanism works but are not specific
-109619 reproductions.
+tested with the external cozybear/cve-2026-109619 PoC; see tests/RESULTS.md.
+The canary OOM tests here confirm the fail-closed mechanism works but are not
+specific 109619 reproductions.
 
 Usage:
     python attack_test.py [base_url]
@@ -100,7 +100,8 @@ attack(
 # ── Canary OOM tripwire ──
 # These test the fail-closed mechanism: a large body that OOMs a canary
 # triggers a block even though it isn't a specific CVE-2026-109619 chain.
-# The real 109619 RCE sequence is tested by stress_test.py (cozybear harness).
+# The real 109619 RCE sequence was tested with the external cozybear/cve-2026-109619
+# PoC; see tests/RESULTS.md for full results.
 print("\n--- Canary OOM tripwire (fail-closed) ---")
 
 attack(

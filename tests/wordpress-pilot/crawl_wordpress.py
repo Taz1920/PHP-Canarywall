@@ -205,7 +205,7 @@ hit("GET", "/favicon.ico", "favicon")
 hit("GET", "/robots.txt", "robots.txt")
 hit("GET", "/wp-sitemap.xml", "sitemap")
 
-hit("POST", "/wp-admin/admin-ajax.php", "large AJAX body (WP returns 500)", data={
+hit("POST", "/wp-admin/admin-ajax.php", "large AJAX body (WP itself returns 500)", data={
     "action": "heartbeat",
     "data": "x" * 50000,
 })
