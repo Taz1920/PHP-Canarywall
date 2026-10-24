@@ -40,7 +40,8 @@ services:
       SENTINEL_BLOCK_UPLOAD_PROGRESS: "${SENTINEL_BLOCK_UPLOAD_PROGRESS:-true}"
       SENTINEL_WEBHOOK_URL: "${SENTINEL_WEBHOOK_URL:-}"
       SENTINEL_ADMIN_KEY: "${SENTINEL_ADMIN_KEY:-}"
-      # SENTINEL_ADMIN_PORT: "9090"  # uncomment to move admin/dashboard off the public port
+      # SENTINEL_ADMIN_PORT: "9090"    # uncomment to move admin/dashboard off the public port
+      # SENTINEL_ADMIN_HOST: "0.0.0.0" # required inside Docker so port mapping works
     volumes:
       - sentinel-logs:/var/log/sentinel
       - ./proxy/sentinel.py:/app/sentinel.py:ro

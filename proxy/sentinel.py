@@ -20,6 +20,8 @@ import signal
 import json
 import secrets
 import hmac
+import posixpath
+from urllib.parse import unquote
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -49,6 +51,7 @@ class SentinelConfig:
     upload_progress_name: str = "PHP_SESSION_UPLOAD_PROGRESS"
     webhook_url: str = ""
     admin_port: int = 0
+    admin_host: str = "127.0.0.1"
     skip_canary_paths: list = field(default_factory=list)
     block_log_max_bytes: int = 50 * 1024 * 1024
 
@@ -78,6 +81,7 @@ class SentinelConfig:
         )
         cfg.webhook_url = os.getenv("SENTINEL_WEBHOOK_URL", "")
         cfg.admin_port = int(os.getenv("SENTINEL_ADMIN_PORT", "0"))
+        cfg.admin_host = os.getenv("SENTINEL_ADMIN_HOST", cfg.admin_host)
         cfg.block_log_max_bytes = int(os.getenv("SENTINEL_BLOCK_LOG_MAX_BYTES", cfg.block_log_max_bytes))
         skip_paths = os.getenv("SENTINEL_SKIP_CANARY_PATHS", "")
         cfg.skip_canary_paths = [p.strip() for p in skip_paths.split(",") if p.strip()]
@@ -376,8 +380,8 @@ class SentinelProxy:
                     content_type="text/plain",
                 )
 
-        req_path = path.split("?", 1)[0]
-        if any(req_path.startswith(p) for p in self.cfg.skip_canary_paths):
+        req_path = posixpath.normpath(unquote(path.split("?", 1)[0]))
+        if any(req_path == p or req_path.startswith(p.rstrip("/") + "/") for p in self.cfg.skip_canary_paths):
             if self.cfg.verbose:
                 self.log.debug(f"SKIP-CANARY {client_ip} {request.method} {path} (path allowlist)")
             self.metrics.bypassed += 1
@@ -667,9 +671,9 @@ async def run():
         admin_app.router.add_route("*", "/{path_info:.*}", proxy.handle_admin)
         admin_runner = web.AppRunner(admin_app, access_log=None)
         await admin_runner.setup()
-        admin_site = web.TCPSite(admin_runner, "127.0.0.1", cfg.admin_port)
+        admin_site = web.TCPSite(admin_runner, cfg.admin_host, cfg.admin_port)
         await admin_site.start()
-        logger.info(f"Admin API/dashboard on 127.0.0.1:{cfg.admin_port} (not exposed on public port)")
+        logger.info(f"Admin API/dashboard on {cfg.admin_host}:{cfg.admin_port} (not exposed on public port)")
     else:
         logger.warning(
             "Admin API is on the public port (%d). Set SENTINEL_ADMIN_PORT to bind "

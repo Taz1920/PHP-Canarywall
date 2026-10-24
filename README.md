@@ -135,8 +135,9 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing the session upload progress field name. This is the shared attack surface for CVE-2026-109618 and CVE-2026-109619. Set to `false` only if your app uses PHP's session upload progress feature. |
 | `SENTINEL_UPLOAD_PROGRESS_NAME` | *(auto-detected)* | The field name to match in multipart bodies. Auto-detected from the canaries' PHP config at startup. **Check your production server:** `php -r "echo ini_get('session.upload_progress.name');"` — if it's not the default (`PHP_SESSION_UPLOAD_PROGRESS`), change it in `canary/php.ini` and the proxy picks it up automatically. This env var overrides auto-detection if set. |
 | `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
-| `SENTINEL_ADMIN_PORT` | *(disabled)* | Bind the admin API, dashboard, and metrics to a separate port (e.g. `9090`). When set, `/__sentinel/admin/*`, `/__sentinel/dashboard`, and `/__sentinel/metrics` return 404 on the public port and only respond on this port, which listens on `127.0.0.1`. **Recommended for production** — keeps the management interface off the internet. |
-| `SENTINEL_SKIP_CANARY_PATHS` | *(empty)* | Comma-separated path prefixes that skip canary replay and go straight to the backend (e.g. `/wp-admin/upload.php,/api/upload`). The upload-progress filter still runs on these paths. Use this for upload endpoints where legitimate files (15MB–32MB) would OOM the canaries. |
+| `SENTINEL_ADMIN_PORT` | *(disabled)* | Bind the admin API, dashboard, and metrics to a separate port (e.g. `9090`). When set, `/__sentinel/admin/*`, `/__sentinel/dashboard`, and `/__sentinel/metrics` return 404 on the public port and only respond on this port. **Recommended for production.** Bare metal: defaults to `127.0.0.1`. Docker: set `SENTINEL_ADMIN_HOST=0.0.0.0` and publish as `127.0.0.1:9090:9090` in compose so Docker can map the port while the host keeps it off the internet. |
+| `SENTINEL_ADMIN_HOST` | `127.0.0.1` | Bind address for the admin port. Set to `0.0.0.0` inside Docker containers (required for port mapping). On bare metal, leave as `127.0.0.1`. |
+| `SENTINEL_SKIP_CANARY_PATHS` | *(empty)* | Comma-separated paths that skip canary replay and go straight to the backend (e.g. `/wp-admin/upload.php,/api/upload/`). Matches are exact or directory-prefix (a trailing `/` matches everything under it). Paths are normalized before matching — `%2e%2e` and `/../` traversals cannot bypass it. The upload-progress filter still runs on these paths. Use this for upload endpoints where legitimate files (15MB–32MB) would OOM the canaries. |
 | `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |
 
@@ -160,7 +161,7 @@ curl -H "X-Sentinel-Key: your-key" http://localhost:8080/__sentinel/admin/canari
 
 The health endpoint (`/__sentinel/health`) remains public for load balancer health checks.
 
-**Production hardening:** Set `SENTINEL_ADMIN_PORT` to move the admin API, dashboard, and metrics off the public port entirely. The admin port binds to `127.0.0.1` only — not reachable from the internet. If you can't use a separate port, put `/__sentinel/admin/*` behind an IP allowlist in your load balancer.
+**Production hardening:** Set `SENTINEL_ADMIN_PORT` to move the admin API, dashboard, and metrics off the public port entirely. On bare metal it binds `127.0.0.1` by default. In Docker, set `SENTINEL_ADMIN_HOST=0.0.0.0` and publish the port as `"127.0.0.1:9090:9090"` in compose — Docker maps it while the host keeps it local. If you can't use a separate port, put `/__sentinel/admin/*` behind an IP allowlist in your load balancer.
 
 ## Webhook / SIEM Integration
 
