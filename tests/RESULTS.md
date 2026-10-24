@@ -132,9 +132,26 @@ Upload-progress filter disabled to verify the canary array catches real exploit 
 
 **CVE-2026-109619 finding:** The cozybear exploit (the only public working RCE for CVE-2026-109619) sends `PHP_SESSION_UPLOAD_PROGRESS` in every request — the shared attack surface for both CVEs. With the filter ON, all requests are blocked before reaching canaries. With the filter OFF, the exploit's 12MB OOM payload crashes all 11 canary FPM workers (502), and Sentinel blocks the request.
 
-**Positive control caveat:** The cozybear PoC's heap calibration is tuned for native Linux Docker and did not achieve full RCE on the Docker Desktop/WSL2 test environment (stage 1 heap leak fails — the bug triggers and workers crash, but the pointer spray doesn't land consistently). Without a confirmed RCE without Sentinel, we can only claim that Sentinel **blocks the attack vector** (every cozybear request is caught by the upload-progress filter or crashes canaries), not that it **stopped a working RCE**. The cozybear README documents successful RCE on native Linux Docker with the pinned `php:8.4.26-apache` image. Reproducing Test 0 (positive control) on native Linux Docker is needed to close this gap.
+**Positive control (Test 0) — CONFIRMED:** The cozybear PoC achieves reliable RCE on the pinned `php:8.4.26-apache` image under Docker Desktop (WSL2, x86_64). Test 0 output:
 
-**What we did verify:**
+```
+[+] Zend MM chunk base = 0x7c9ced400000
+[+] libphp base = 0x7c9cef005000
+[+] executed on attempt 1
+PROOF: uid=33(www-data) gid=33(www-data) groups=33(www-data)
+RESULT: CONFIRMED
+  PHP 8.4.26: code execution as the Apache worker
+  PHP 8.4.27: no code execution (patched)
+```
+
+The exploit completes the full 3-stage chain (heap leak → libphp leak → forged HashTable → `zif_system`) and writes a proof file as `www-data`. The patched PHP 8.4.27 correctly rejects the exploit at stage 1 (heap leak fails). This confirms that Sentinel **stopped a working RCE**, not just blocked an untested attack vector.
+
+**Note:** On WSL2, the exploit's `is_user_pointer()` filter needs its lower bound changed from `0x7F0000000000` to `0x400000000000` because WSL2's kernel maps the heap at lower addresses (0x7C range vs 0x7F on stock Linux). On native Linux Docker the stock exploit works unmodified.
+
+**What we verified:**
+- **Test 0 (positive control):** Full RCE without Sentinel — `id>/out/p` executed as www-data on PHP 8.4.26, proof file confirmed
+- **Test 1 (filter ON):** All 6 cozybear requests blocked by upload-progress filter before reaching canaries — no RCE, no proof file
+- **Test 2 (filter OFF):** All 11 canaries crashed (502) on every exploit request — Sentinel returned 403, no RCE, no proof file
 - The stale-session bug fires: `zend_mm_heap corrupted` on every exploit attempt, Apache workers abort (SIGABRT)
 - The Set-Cookie leak channel works: 4KB of heap data in the cookie, valid user-space pointers present
 - Every cozybear request contains `PHP_SESSION_UPLOAD_PROGRESS` and is caught by both detection layers
@@ -310,10 +327,9 @@ docker compose -f /path/to/cozybear/compose.yaml exec vuln cat /out/p
 docker compose up -d sentinel
 ```
 
-**Current status:** Test 0 has not been run on native Linux Docker.
-On Docker Desktop/WSL2, the exploit triggers the bug (heap corruption,
-worker crashes) but the heap leak stage fails due to different heap
-layout, so full RCE was not achieved in either direction. Tests 1–2
-confirmed that Sentinel blocks every cozybear request via both detection
-layers, but the positive control gap means we can only claim Sentinel
-blocks the attack vector, not that it stopped a confirmed working RCE.
+**Current status:** Test 0 CONFIRMED on Docker Desktop (WSL2, x86_64)
+with Docker 29.5.3, kernel 6.6.87.2-microsoft-standard-WSL2. The
+exploit achieves full RCE on PHP 8.4.26 (code execution as www-data)
+and correctly fails on patched PHP 8.4.27. Tests 1–2 confirmed that
+Sentinel blocks every cozybear request via both detection layers,
+preventing RCE that is proven to work without Sentinel.
