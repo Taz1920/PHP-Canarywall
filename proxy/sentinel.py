@@ -50,6 +50,7 @@ class SentinelConfig:
     block_upload_progress: bool = True
     upload_progress_name: str = "PHP_SESSION_UPLOAD_PROGRESS"
     webhook_url: str = ""
+    shadow_mode: bool = False
     admin_port: int = 0
     admin_host: str = "127.0.0.1"
     skip_canary_paths: list = field(default_factory=list)
@@ -80,6 +81,7 @@ class SentinelConfig:
             "SENTINEL_UPLOAD_PROGRESS_NAME", cfg.upload_progress_name
         )
         cfg.webhook_url = os.getenv("SENTINEL_WEBHOOK_URL", "")
+        cfg.shadow_mode = os.getenv("SENTINEL_SHADOW_MODE", "").lower() in ("1", "true", "yes")
         cfg.admin_port = int(os.getenv("SENTINEL_ADMIN_PORT", "0"))
         cfg.admin_host = os.getenv("SENTINEL_ADMIN_HOST", cfg.admin_host)
         cfg.block_log_max_bytes = int(os.getenv("SENTINEL_BLOCK_LOG_MAX_BYTES", cfg.block_log_max_bytes))
@@ -369,11 +371,14 @@ class SentinelProxy:
             ct = (request.content_type or "").lower()
             if "multipart" in ct:
                 self.metrics.blocked += 1
+                label = "SHADOW" if self.cfg.shadow_mode else "BLOCKED"
                 self.log.warning(
-                    f"BLOCKED {client_ip} {request.method} {path} — "
+                    f"{label} {client_ip} {request.method} {path} — "
                     f"{self.cfg.upload_progress_name} in multipart body (CVE-2026-109618/109619 vector)"
                 )
                 await self._log_blocked(request, body, client_ip, ["upload_progress_blocked"])
+                if self.cfg.shadow_mode:
+                    return await self._forward_to_backend(request, body)
                 return web.Response(
                     status=403,
                     text="Request blocked by PHP Sentinel. session.upload_progress exploit vector detected.\n",
@@ -404,8 +409,12 @@ class SentinelProxy:
         else:
             self.metrics.blocked += 1
             names = ", ".join(failed_canaries)
-            self.log.warning(f"BLOCKED {client_ip} {request.method} {path} — killed: [{names}]")
+            label = "SHADOW" if self.cfg.shadow_mode else "BLOCKED"
+            self.log.warning(f"{label} {client_ip} {request.method} {path} — killed: [{names}]")
             await self._log_blocked(request, body, client_ip, failed_canaries)
+            if self.cfg.shadow_mode:
+                self.metrics.forwarded += 1
+                return await self._forward_to_backend(request, body)
             return web.Response(
                 status=403,
                 text=f"Request blocked by PHP Sentinel. Canary kill: [{names}]\n",
@@ -647,6 +656,8 @@ async def run():
         f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
         f"canaries={cfg.canary_urls}  backend={cfg.backend_url}"
     )
+    if cfg.shadow_mode:
+        logger.warning("SHADOW MODE — blocks are logged but requests are forwarded to the backend")
     if getattr(cfg, '_admin_key_generated', False):
         logger.warning(
             f"No SENTINEL_ADMIN_KEY set — generated random key for this session:\n"
