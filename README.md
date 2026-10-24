@@ -48,7 +48,7 @@ Every canary runs in isolation: no database, no secrets, no network egress. Its 
 
 - The upload-progress filter blocks the shared attack surface for both CVE-2026-109618 and CVE-2026-109619. Both CVEs are triggered through the `session.upload_progress` handler.
 - The canary array detects exploits that **crash** PHP workers. A successful RCE that runs without crashing is not caught by the canaries.
-- Canaries run `memory_limit=16M`, not production's config. OOM thresholds can differ. The canaries are a safety net, not a guarantee.
+- Canaries run `memory_limit=16M`. **Keep this at or below production's `memory_limit`** (`php -r "echo ini_get('memory_limit');"` to check) — CVE-2026-109618 is triggered by hitting the OOM handler, so the canary must reach that limit before production does. Do not raise it to avoid false positives on large uploads; use `SENTINEL_SKIP_CANARY_PATHS` instead.
 - CVE-2026-109619 can corrupt worker state across multiple requests. Single-request canary replay does not reproduce multi-request heap grooming. The upload-progress filter blocks the entry point; the canaries cannot independently detect silent cross-request exploitation.
 - Adds latency per request (parallel canary replay, bounded by the slowest canary). The upload-progress filter adds none.
 
@@ -59,7 +59,7 @@ Two separate limits control body handling:
 - **`SENTINEL_MAX_BODY_SIZE`** (default 100MB) — maximum body the proxy accepts. Anything larger gets HTTP 413.
 - **`SENTINEL_MAX_REPLAY_BODY`** (default 32MB) — maximum body replayed through canaries. Bodies between this and `MAX_BODY_SIZE` bypass the canaries and go straight to the backend.
 
-Canaries run with `memory_limit=16M`, so bodies larger than ~15MB will OOM canary workers and be blocked. Set `SENTINEL_MAX_REPLAY_BODY=0` to force all requests through canaries regardless of size.
+Canaries run with `memory_limit=16M`, so bodies larger than ~15MB will OOM canary workers and be blocked. If your app has upload endpoints that handle files in the 15MB–32MB range, add those paths to `SENTINEL_SKIP_CANARY_PATHS` — they'll skip canary replay but the upload-progress filter still protects them.
 
 ## Features
 
@@ -131,9 +131,12 @@ All settings are environment variables on the `sentinel` container:
 | `SENTINEL_MAX_REPLAY_BODY` | `33554432` | Max body size to replay through canaries (32MB). Larger requests bypass canaries and go straight to the backend. |
 | `SENTINEL_MAX_BODY_SIZE` | `104857600` | Max body size the proxy accepts (100MB). Requests exceeding this get HTTP 413. |
 | `SENTINEL_BLOCK_LOG` | `/var/log/sentinel/blocked.jsonl` | Path for blocked request log |
+| `SENTINEL_BLOCK_LOG_MAX_BYTES` | `52428800` | Max block log size (50MB). When exceeded, the log is rotated to `blocked.jsonl.1` (one backup kept). Set to `0` to disable rotation. |
 | `SENTINEL_BLOCK_UPLOAD_PROGRESS` | `true` | Block any multipart request containing the session upload progress field name. This is the shared attack surface for CVE-2026-109618 and CVE-2026-109619. Set to `false` only if your app uses PHP's session upload progress feature. |
-| `SENTINEL_UPLOAD_PROGRESS_NAME` | *(auto-detected)* | The field name to match in multipart bodies. Auto-detected from the canaries' PHP config at startup. If your production PHP uses a custom `session.upload_progress.name`, change it in `canary/php.ini` — the proxy picks it up automatically. This env var overrides auto-detection if set. |
+| `SENTINEL_UPLOAD_PROGRESS_NAME` | *(auto-detected)* | The field name to match in multipart bodies. Auto-detected from the canaries' PHP config at startup. **Check your production server:** `php -r "echo ini_get('session.upload_progress.name');"` — if it's not the default (`PHP_SESSION_UPLOAD_PROGRESS`), change it in `canary/php.ini` and the proxy picks it up automatically. This env var overrides auto-detection if set. |
 | `SENTINEL_WEBHOOK_URL` | *(empty)* | URL to POST block events to (SIEM, Slack, CrowdStrike, Splunk HEC, etc.). Each blocked request sends a JSON payload with client IP, method, path, headers, and which canaries were killed. |
+| `SENTINEL_ADMIN_PORT` | *(disabled)* | Bind the admin API, dashboard, and metrics to a separate port (e.g. `9090`). When set, `/__sentinel/admin/*`, `/__sentinel/dashboard`, and `/__sentinel/metrics` return 404 on the public port and only respond on this port, which listens on `127.0.0.1`. **Recommended for production** — keeps the management interface off the internet. |
+| `SENTINEL_SKIP_CANARY_PATHS` | *(empty)* | Comma-separated path prefixes that skip canary replay and go straight to the backend (e.g. `/wp-admin/upload.php,/api/upload`). The upload-progress filter still runs on these paths. Use this for upload endpoints where legitimate files (15MB–32MB) would OOM the canaries. |
 | `SENTINEL_ADMIN_KEY` | *(random)* | API key for admin/dashboard access. If not set, a random key is generated and printed to the container logs on startup. |
 | `SENTINEL_VERBOSE` | `false` | Log every request |
 
@@ -156,6 +159,8 @@ curl -H "X-Sentinel-Key: your-key" http://localhost:8080/__sentinel/admin/canari
 ```
 
 The health endpoint (`/__sentinel/health`) remains public for load balancer health checks.
+
+**Production hardening:** Set `SENTINEL_ADMIN_PORT` to move the admin API, dashboard, and metrics off the public port entirely. The admin port binds to `127.0.0.1` only — not reachable from the internet. If you can't use a separate port, put `/__sentinel/admin/*` behind an IP allowlist in your load balancer.
 
 ## Webhook / SIEM Integration
 
@@ -226,6 +231,8 @@ curl http://localhost:8080/__sentinel/metrics
 | 504 / timeout | Worker hung | **Block** |
 | Connection reset | Worker died mid-response | **Block** |
 
+**Fail-closed design:** 503 and 504 can also come from canary overload, not just attacks. Under heavy traffic, an undersized canary pool will block legitimate requests. Size the canary FPM pool (`pm.max_children` in `canary/fpm.conf`) to handle your expected concurrent request rate. The default is 4 workers per canary — increase it for high-traffic sites, or use `SENTINEL_SKIP_CANARY_PATHS` to exempt high-volume endpoints.
+
 ## Testing
 
 Two test suites are included:
@@ -281,8 +288,10 @@ backend:
 3. Sentinel forwards clean traffic to your app automatically
 
 ```
-Internet → Load Balancer → Sentinel (:8080) → Your PHP App (:80)
+Internet → Load Balancer (TLS) → Sentinel (:8080) → Your PHP App (:80)
 ```
+
+**TLS:** Sentinel listens on plain HTTP. Terminate TLS at your load balancer or reverse proxy in front of Sentinel — do not expose port 8080 directly to the internet without TLS termination upstream.
 
 Works with any PHP application: WordPress, Laravel, Drupal, CodeIgniter, custom apps — anything served by PHP over HTTP.
 
@@ -375,7 +384,7 @@ SENTINEL_ADMIN_KEY=your-secret-key \
 python proxy/sentinel.py
 ```
 
-The proxy auto-detects `session.upload_progress.name` from the canary at startup. Route traffic to port 8080 instead of directly to your app.
+The proxy auto-detects `session.upload_progress.name` from the canary at startup. If your app uses a custom `session.upload_progress.name`, set the same value in `canary/php.ini`; the proxy picks it up automatically. Route traffic to port 8080 instead of directly to your app.
 
 **Note:** A single canary matching your production PHP version is sufficient — the multi-version array is for environments where the PHP version is unknown or mixed.
 

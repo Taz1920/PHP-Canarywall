@@ -48,6 +48,9 @@ class SentinelConfig:
     block_upload_progress: bool = True
     upload_progress_name: str = "PHP_SESSION_UPLOAD_PROGRESS"
     webhook_url: str = ""
+    admin_port: int = 0
+    skip_canary_paths: list = field(default_factory=list)
+    block_log_max_bytes: int = 50 * 1024 * 1024
 
     @classmethod
     def from_env(cls) -> "SentinelConfig":
@@ -74,6 +77,10 @@ class SentinelConfig:
             "SENTINEL_UPLOAD_PROGRESS_NAME", cfg.upload_progress_name
         )
         cfg.webhook_url = os.getenv("SENTINEL_WEBHOOK_URL", "")
+        cfg.admin_port = int(os.getenv("SENTINEL_ADMIN_PORT", "0"))
+        cfg.block_log_max_bytes = int(os.getenv("SENTINEL_BLOCK_LOG_MAX_BYTES", cfg.block_log_max_bytes))
+        skip_paths = os.getenv("SENTINEL_SKIP_CANARY_PATHS", "")
+        cfg.skip_canary_paths = [p.strip() for p in skip_paths.split(",") if p.strip()]
         cfg.admin_key = os.getenv("SENTINEL_ADMIN_KEY", "")
         if not cfg.admin_key:
             cfg.admin_key = secrets.token_urlsafe(32)
@@ -203,18 +210,9 @@ class SentinelProxy:
             status=401,
         )
 
-    @staticmethod
-    def _cors(resp: web.Response) -> web.Response:
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return resp
-
     async def _handle_admin(self, request: web.Request, path: str) -> web.Response:
-        if request.method == "OPTIONS":
-            return self._cors(web.Response(status=204))
         if not self._check_auth(request):
-            return self._cors(self._unauthorized())
+            return self._unauthorized()
         if path == "/__sentinel/admin/canaries" and request.method == "GET":
             canaries = []
             health_tasks = {name: self._check_canary_health(name) for name in self.canary_names}
@@ -232,7 +230,7 @@ class SentinelProxy:
                     "url": self.canary_url_map[name],
                     "metrics": self.metrics.per_canary.get(name, {}),
                 })
-            return self._cors(web.json_response({"canaries": canaries}))
+            return web.json_response({"canaries": canaries})
 
         if path.startswith("/__sentinel/admin/canaries/") and request.method == "POST":
             parts = path.split("/")
@@ -244,11 +242,11 @@ class SentinelProxy:
                 if action == "enable":
                     self.disabled_canaries.discard(name)
                     self.log.info(f"ADMIN: Enabled canary [{name}]")
-                    return self._cors(web.json_response({"ok": True, "name": name, "enabled": True}))
+                    return web.json_response({"ok": True, "name": name, "enabled": True})
                 elif action == "disable":
                     self.disabled_canaries.add(name)
                     self.log.info(f"ADMIN: Disabled canary [{name}]")
-                    return self._cors(web.json_response({"ok": True, "name": name, "enabled": False}))
+                    return web.json_response({"ok": True, "name": name, "enabled": False})
 
         if path == "/__sentinel/admin/canaries/bulk" and request.method == "POST":
             try:
@@ -258,10 +256,10 @@ class SentinelProxy:
             enabled_list = data.get("enabled", [])
             self.disabled_canaries = {n for n in self.canary_names if n not in enabled_list}
             self.log.info(f"ADMIN: Bulk update — enabled={enabled_list}, disabled={list(self.disabled_canaries)}")
-            return self._cors(web.json_response({"ok": True, "enabled": enabled_list, "disabled": list(self.disabled_canaries)}))
+            return web.json_response({"ok": True, "enabled": enabled_list, "disabled": list(self.disabled_canaries)})
 
         if path == "/__sentinel/admin/config" and request.method == "GET":
-            return self._cors(web.json_response({
+            return web.json_response({
                 "config": {
                     "canary_timeout": self.cfg.canary_timeout,
                     "max_replay_body": self.cfg.max_replay_body,
@@ -273,13 +271,13 @@ class SentinelProxy:
                     "verbose": self.cfg.verbose,
                     "block_log": self.cfg.block_log,
                 }
-            }))
+            })
 
         if path == "/__sentinel/admin/config" and request.method == "POST":
             try:
                 data = await request.json()
             except Exception:
-                return self._cors(web.json_response({"error": "Invalid JSON"}, status=400))
+                return web.json_response({"error": "Invalid JSON"}, status=400)
             changed = []
             if "canary_timeout" in data:
                 val = float(data["canary_timeout"])
@@ -308,9 +306,9 @@ class SentinelProxy:
                 self.cfg.canary_fail_codes = codes
                 changed.append(f"canary_fail_codes={codes}")
             self.log.info(f"ADMIN: Config updated — {', '.join(changed)}")
-            return self._cors(web.json_response({"ok": True, "changed": changed}))
+            return web.json_response({"ok": True, "changed": changed})
 
-        return self._cors(web.json_response({"error": "Not found"}, status=404))
+        return web.json_response({"error": "Not found"}, status=404)
 
     async def _serve_dashboard(self, request: web.Request) -> web.Response:
         dashboard_paths = [
@@ -325,21 +323,35 @@ class SentinelProxy:
                 return web.Response(text=html, content_type="text/html")
         return web.Response(text="Dashboard not found. Place dashboard/index.html in the project root.", status=404)
 
+    def _is_admin_path(self, path: str) -> bool:
+        return (
+            path.startswith("/__sentinel/admin/")
+            or path in ("/__sentinel/dashboard", "/__sentinel/dashboard/")
+            or path == "/__sentinel/metrics"
+        )
+
+    async def handle_admin(self, request: web.Request) -> web.StreamResponse:
+        path = request.path_qs
+        if path.startswith("/__sentinel/admin/"):
+            return await self._handle_admin(request, path)
+        if path in ("/__sentinel/dashboard", "/__sentinel/dashboard/"):
+            return await self._serve_dashboard(request)
+        if path == "/__sentinel/metrics":
+            if not self._check_auth(request):
+                return self._unauthorized()
+            return web.json_response(self.metrics.to_dict())
+        return web.json_response({"error": "Not found"}, status=404)
+
     async def handle(self, request: web.Request) -> web.StreamResponse:
         path = request.path_qs
 
-        if path.startswith("/__sentinel/admin/"):
-            return await self._handle_admin(request, path)
-
-        if path == "/__sentinel/dashboard" or path == "/__sentinel/dashboard/":
-            return await self._serve_dashboard(request)
+        if self._is_admin_path(path):
+            if self.cfg.admin_port:
+                return web.json_response({"error": "Not found"}, status=404)
+            return await self.handle_admin(request)
 
         if path == "/__sentinel/health":
-            return self._cors(web.json_response({"status": "ok"}))
-        if path == "/__sentinel/metrics":
-            if not self._check_auth(request):
-                return self._cors(self._unauthorized())
-            return self._cors(web.json_response(self.metrics.to_dict()))
+            return web.json_response({"status": "ok"})
 
         self.metrics.total_requests += 1
         client_ip = request.remote or "unknown"
@@ -363,6 +375,13 @@ class SentinelProxy:
                     text="Request blocked by PHP Sentinel. session.upload_progress exploit vector detected.\n",
                     content_type="text/plain",
                 )
+
+        req_path = path.split("?", 1)[0]
+        if any(req_path.startswith(p) for p in self.cfg.skip_canary_paths):
+            if self.cfg.verbose:
+                self.log.debug(f"SKIP-CANARY {client_ip} {request.method} {path} (path allowlist)")
+            self.metrics.bypassed += 1
+            return await self._forward_to_backend(request, body)
 
         if self.cfg.max_replay_body and len(body) > self.cfg.max_replay_body:
             self.log.info(
@@ -554,6 +573,17 @@ class SentinelProxy:
         }
         if self.cfg.block_log:
             try:
+                if self.cfg.block_log_max_bytes:
+                    try:
+                        sz = os.path.getsize(self.cfg.block_log)
+                    except OSError:
+                        sz = 0
+                    if sz >= self.cfg.block_log_max_bytes:
+                        rotated = self.cfg.block_log + ".1"
+                        try:
+                            os.replace(self.cfg.block_log, rotated)
+                        except OSError:
+                            pass
                 with open(self.cfg.block_log, "a") as f:
                     f.write(json.dumps(entry) + "\n")
             except Exception as exc:
@@ -604,6 +634,10 @@ async def run():
             logger.info(f"Auto-detected session.upload_progress.name from canary: {detected}")
         elif detected:
             logger.info(f"Upload-progress filter targeting: {detected}")
+        logger.info(
+            "Verify this matches production: "
+            "php -r \"echo ini_get('session.upload_progress.name');\" on your prod server"
+        )
 
     logger.info(
         f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
@@ -627,6 +661,22 @@ async def run():
     site = web.TCPSite(runner, cfg.listen_host, cfg.listen_port)
     await site.start()
 
+    admin_runner = None
+    if cfg.admin_port:
+        admin_app = web.Application()
+        admin_app.router.add_route("*", "/{path_info:.*}", proxy.handle_admin)
+        admin_runner = web.AppRunner(admin_app, access_log=None)
+        await admin_runner.setup()
+        admin_site = web.TCPSite(admin_runner, "127.0.0.1", cfg.admin_port)
+        await admin_site.start()
+        logger.info(f"Admin API/dashboard on 127.0.0.1:{cfg.admin_port} (not exposed on public port)")
+    else:
+        logger.warning(
+            "Admin API is on the public port (%d). Set SENTINEL_ADMIN_PORT to bind "
+            "it to a separate internal port, or put /__sentinel/admin/* behind an IP allowlist.",
+            cfg.listen_port,
+        )
+
     stop_event = asyncio.Event()
 
     def _shutdown(sig, frame):
@@ -640,6 +690,8 @@ async def run():
 
     logger.info(f"Final metrics: {json.dumps(proxy.metrics.to_dict())}")
     await proxy.stop()
+    if admin_runner:
+        await admin_runner.cleanup()
     await runner.cleanup()
 
 

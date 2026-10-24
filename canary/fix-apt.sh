@@ -19,8 +19,6 @@ case "$CODENAME" in
     sed -i '/-updates/d' /etc/apt/sources.list
     cat > /etc/apt/apt.conf.d/99archive <<APTEOF
 Acquire::Check-Valid-Until "false";
-Acquire::AllowInsecureRepositories "true";
-Acquire::AllowDowngradeToInsecureRepositories "true";
 APTEOF
     ;;
 esac

@@ -5,7 +5,7 @@ FROM ${PHP_IMAGE}
 # Fix archived Debian repos for EOL distros
 COPY fix-apt.sh /tmp/fix-apt.sh
 RUN chmod +x /tmp/fix-apt.sh && /tmp/fix-apt.sh && \
-    apt-get install -y --no-install-recommends --allow-unauthenticated nginx curl procps && \
+    apt-get install -y --no-install-recommends nginx curl procps && \
     rm -rf /var/lib/apt/lists/* /tmp/fix-apt.sh
 
 # Enable the session extension (may already be compiled in)
