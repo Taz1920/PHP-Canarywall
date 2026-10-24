@@ -27,6 +27,7 @@ services:
     container_name: php-sentinel
     ports:
       - "8080:8080"
+      # - "127.0.0.1:9090:9090"  # admin port — host-only; uncomment with SENTINEL_ADMIN_PORT
     environment:
       SENTINEL_CANARY_URLS: "http://canary-84:9080,http://canary-83:9080,http://canary-82:9080,http://canary-81:9080,http://canary-80:9080,http://canary-74:9080,http://canary-73:9080,http://canary-72:9080,http://canary-71:9080,http://canary-70:9080,http://canary-56:9080"
       SENTINEL_BACKEND_URL: "http://backend:80"
