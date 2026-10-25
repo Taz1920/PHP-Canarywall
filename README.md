@@ -1,4 +1,4 @@
-# PHP-Canarywall
+# PHP CanaryWall
 
 A reverse proxy that defends PHP applications against CVE-2026-109618 and the known public exploits for CVE-2026-109619 (php2shell). Two layers of protection:
 
@@ -73,8 +73,8 @@ Canaries run with `memory_limit=16M`, so bodies larger than ~15MB will OOM canar
 ## Quick Start
 
 ```bash
-git clone https://github.com/Taz1920/php-sentinel.git
-cd php-sentinel
+git clone https://github.com/Taz1920/php-canarywall.git
+cd php-canarywall
 
 # Build all canary images (first run takes a few minutes)
 docker compose build
@@ -101,7 +101,7 @@ If you only need specific PHP versions:
 
 ```bash
 # Build a single version
-docker build -t php-sentinel-canary-74:latest \
+docker build -t php-canarywall-canary-74:latest \
   --build-arg PHP_IMAGE=php:7.4-fpm ./canary
 
 # Build all 11 versions
@@ -114,7 +114,7 @@ for ver in 84 83 82 81 80 74 73 72 71 70 56; do
     71) img=php:7.1-fpm ;; 70) img=php:7.0-fpm ;;
     56) img=php:5.6-fpm ;;
   esac
-  docker build -t php-sentinel-canary-$ver:latest \
+  docker build -t php-canarywall-canary-$ver:latest \
     --build-arg PHP_IMAGE=$img ./canary
 done
 ```
@@ -152,7 +152,7 @@ The admin API, dashboard, and metrics endpoints are all protected by an API key.
 SENTINEL_ADMIN_KEY=your-secret-key-here
 
 # Option 2: Let Sentinel generate a random key (check the logs)
-docker logs php-sentinel 2>&1 | grep ADMIN_KEY
+docker logs php-canarywall 2>&1 | grep ADMIN_KEY
 ```
 
 The dashboard at `/__sentinel/dashboard` will prompt you for the key on first visit. For API calls, pass the key via header:
@@ -185,7 +185,7 @@ Every blocked request POSTs a JSON payload:
 ```json
 {
   "event": "request_blocked",
-  "source": "php-sentinel",
+  "source": "php-canarywall",
   "ts": "2026-10-22T15:30:00+0000",
   "client_ip": "203.0.113.42",
   "method": "POST",
@@ -257,7 +257,7 @@ The kill test exercises:
 
 ## Connecting to Your App
 
-PHP Sentinel sits between the internet and your PHP application. You have two options:
+PHP CanaryWall sits between the internet and your PHP application. You have two options:
 
 ### Option 1: Point Sentinel at your existing server
 

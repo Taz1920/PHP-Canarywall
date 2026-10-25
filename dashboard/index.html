@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PHP Sentinel</title>
+<title>PHP CanaryWall</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
 <style>
 :root {
@@ -147,12 +147,12 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       </svg>
     </div>
-    <h2>PHP Sentinel</h2>
+    <h2>PHP CanaryWall</h2>
     <p class="sub">Enter your admin key to access the dashboard</p>
     <input type="password" id="login-key" placeholder="SENTINEL_ADMIN_KEY" autocomplete="off" spellcheck="false">
     <div class="login-error" id="login-error"></div>
     <button class="btn-login" id="btn-login">Authenticate</button>
-    <p class="hint">Find your key in the container logs:<br><code>docker logs php-sentinel 2>&amp;1 | grep ADMIN_KEY</code></p>
+    <p class="hint">Find your key in the container logs:<br><code>docker logs php-canarywall 2>&amp;1 | grep ADMIN_KEY</code></p>
   </div>
 </div>
 
@@ -166,7 +166,7 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       </svg>
     </span>
-    PHP Sentinel
+    PHP CanaryWall
   </h1>
   <div class="header-right">
     <div id="conn-status" class="status-badge offline">
@@ -246,7 +246,7 @@ body { background: var(--bg); color: var(--fg); padding: 0 16px; margin: 0; min-
 </div>
 
 <div class="footer">
-  <span>PHP Sentinel Dashboard</span>
+  <span>PHP CanaryWall Dashboard</span>
   <span class="endpoint" id="footer-endpoint"></span>
 </div>
 

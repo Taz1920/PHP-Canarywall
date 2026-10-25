@@ -149,6 +149,6 @@ th { background: #f5f5f5; }
 <?php endif; ?>
 
 <hr>
-<small>Validated by PHP Sentinel | <?php echo date('Y-m-d H:i:s'); ?></small>
+<small>Validated by PHP CanaryWall | <?php echo date('Y-m-d H:i:s'); ?></small>
 </body>
 </html>

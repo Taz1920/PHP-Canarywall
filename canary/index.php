@@ -1,6 +1,6 @@
 <?php
 /**
- * PHP Sentinel — Canary Endpoint
+ * PHP CanaryWall — Canary Endpoint
  *
  * Forces PHP to fully parse the request through every SAPI code path
  * that php2shell targets: multipart boundary parsing, session upload

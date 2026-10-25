@@ -1,4 +1,4 @@
-# PHP Sentinel — Test Results
+# PHP CanaryWall — Test Results
 
 **Date:** 2026-10-23
 **Version:** v0.3.0 (post-hardening)
@@ -287,14 +287,14 @@ docker compose exec vuln cat /out/p
 
 ```bash
 # Connect the cozybear vulnerable target to Sentinel's network
-docker network connect php-sentinel_sentinel-net cve-2026-109619-vuln-1
+docker network connect php-canarywall_sentinel-net cve-2026-109619-vuln-1
 
 # Point Sentinel at the vulnerable target
 # Set SENTINEL_BACKEND_URL=http://cve-2026-109619-vuln-1:80 in .env
 docker compose up -d sentinel   # recreate to pick up change
 
 # Clear the block log and proof file
-docker exec php-sentinel python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
+docker exec php-canarywall python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
 docker compose -f /path/to/cozybear/compose.yaml exec vuln rm -f /out/p
 
 # Run the exploit against Sentinel's public port
@@ -305,7 +305,7 @@ python3 attacker/exploit.py \
 
 # Expected: exploit fails — all requests return 403 or connection reset
 # Check the block log:
-docker exec php-sentinel cat /var/log/sentinel/blocked.jsonl
+docker exec php-canarywall cat /var/log/sentinel/blocked.jsonl
 # Every entry should show "upload_progress_blocked"
 
 # Verify no RCE proof
@@ -321,7 +321,7 @@ docker compose -f /path/to/cozybear/compose.yaml exec vuln cat /out/p
 docker compose up -d sentinel   # recreate to pick up change
 
 # Clear the block log and proof file
-docker exec php-sentinel python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
+docker exec php-canarywall python3 -c "open('/var/log/sentinel/blocked.jsonl','w').close()"
 docker compose -f /path/to/cozybear/compose.yaml exec vuln rm -f /out/p
 
 # Run the exploit again

@@ -2,9 +2,9 @@
 
 ## Summary
 
-We investigated whether an attacker could modify the CVE-2026-109619 exploit to achieve **silent RCE** — command execution where the Apache worker survives, evading crash-based detection systems like PHP Sentinel's canary array.
+We investigated whether an attacker could modify the CVE-2026-109619 exploit to achieve **silent RCE** — command execution where the Apache worker survives, evading crash-based detection systems like PHP CanaryWall's canary array.
 
-**Finding: Silent RCE requires root privileges on the container.** The crash is inherent to the unprivileged exploit path and cannot be suppressed without patching the worker's executable memory via `/proc/PID/mem`. Since the initial (crash-inducing) RCE must fire first to gain any foothold, PHP Sentinel detects the attack before the evasion technique could ever be deployed.
+**Finding: Silent RCE requires root privileges on the container.** The crash is inherent to the unprivileged exploit path and cannot be suppressed without patching the worker's executable memory via `/proc/PID/mem`. Since the initial (crash-inducing) RCE must fire first to gain any foothold, PHP CanaryWall detects the attack before the evasion technique could ever be deployed.
 
 ## Background
 
@@ -65,11 +65,11 @@ There is no other path to modify `.text` at runtime without `CAP_SYS_PTRACE` or 
 - Patch target 1: `libphp+0x613c02`
 - Patch target 2: `libphp+0x613c2b`
 
-## Implications for PHP Sentinel
+## Implications for PHP CanaryWall
 
 The silent RCE variant is **not a practical threat** to crash-based detection:
 
-1. **The attacker must trigger the crash first.** The unprivileged exploit (stages 1-3) crashes the worker. There is no unprivileged path to suppress the crash. PHP Sentinel's canary array detects this crash and blocks the request.
+1. **The attacker must trigger the crash first.** The unprivileged exploit (stages 1-3) crashes the worker. There is no unprivileged path to suppress the crash. PHP CanaryWall's canary array detects this crash and blocks the request.
 
 2. **Root is required for the bypass.** Writing to `/proc/PID/mem` requires root or `CAP_SYS_PTRACE`. An attacker can only obtain these privileges by first exploiting the system — which means triggering the crash, which means getting caught.
 

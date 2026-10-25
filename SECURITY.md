@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you find a security vulnerability in PHP Sentinel, please report it responsibly.
+If you find a security vulnerability in PHP CanaryWall, please report it responsibly.
 
 **Email:** ryan.tj.birdusnavy@gmail.com
 
@@ -16,7 +16,7 @@ I will acknowledge receipt within 48 hours and aim to provide a fix or mitigatio
 
 ## Scope
 
-This policy covers vulnerabilities in PHP Sentinel itself — the proxy, canary configuration, dashboard, and admin API. It does not cover the PHP vulnerabilities (CVE-2026-109618, CVE-2026-109619) that Sentinel is designed to mitigate.
+This policy covers vulnerabilities in PHP CanaryWall itself — the proxy, canary configuration, dashboard, and admin API. It does not cover the PHP vulnerabilities (CVE-2026-109618, CVE-2026-109619) that Sentinel is designed to mitigate.
 
 ## Supported Versions
 

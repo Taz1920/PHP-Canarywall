@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PHP Sentinel — Request Sanitization Proxy (Multi-Canary)
+PHP CanaryWall — Request Sanitization Proxy (Multi-Canary)
 
 Replays every inbound HTTP request against MULTIPLE canary PHP instances
 running different PHP versions in parallel.  If ANY canary's worker
@@ -382,7 +382,7 @@ class SentinelProxy:
                     return await self._forward_to_backend(request, body)
                 return web.Response(
                     status=403,
-                    text="Request blocked by PHP Sentinel. session.upload_progress exploit vector detected.\n",
+                    text="Request blocked by PHP CanaryWall. session.upload_progress exploit vector detected.\n",
                     content_type="text/plain",
                 )
 
@@ -418,7 +418,7 @@ class SentinelProxy:
                 return await self._forward_to_backend(request, body)
             return web.Response(
                 status=403,
-                text=f"Request blocked by PHP Sentinel. Canary kill: [{names}]\n",
+                text=f"Request blocked by PHP CanaryWall. Canary kill: [{names}]\n",
                 content_type="text/plain",
             )
 
@@ -609,7 +609,7 @@ class SentinelProxy:
         try:
             async with self._backend_session.post(
                 self.cfg.webhook_url,
-                json={"event": "request_blocked", "source": "php-sentinel", **entry},
+                json={"event": "request_blocked", "source": "php-canarywall", **entry},
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status >= 400:
@@ -654,7 +654,7 @@ async def run():
         )
 
     logger.info(
-        f"PHP Sentinel listening on {cfg.listen_host}:{cfg.listen_port}  "
+        f"PHP CanaryWall listening on {cfg.listen_host}:{cfg.listen_port}  "
         f"canaries={cfg.canary_urls}  backend={cfg.backend_url}"
     )
     if cfg.shadow_mode:

@@ -1,4 +1,4 @@
-# PHP Sentinel: Blocking php2shell Without Patching PHP
+# PHP CanaryWall: Blocking php2shell Without Patching PHP
 
 ## The Problem
 
@@ -10,7 +10,7 @@ The standard mitigation is to disable `session.upload_progress.enabled`, but tha
 
 ## The Solution
 
-**PHP Sentinel** is a reverse proxy with two layers of protection:
+**PHP CanaryWall** is a reverse proxy with two layers of protection:
 
 1. **Upload-progress filter** — blocks any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`, the root attack surface for CVE-2026-109618. Deterministic, no latency cost.
 2. **Canary array** — replays every request through 11 isolated PHP-FPM instances (PHP 5.6–8.4) in parallel. If any canary worker crashes, OOMs, or hangs, the request is blocked before production sees it.
@@ -117,8 +117,8 @@ Sentinel and WAFs complement each other. Use both.
 Three commands:
 
 ```bash
-git clone https://github.com/Taz1920/php-sentinel.git
-cd php-sentinel
+git clone https://github.com/Taz1920/php-canarywall.git
+cd php-canarywall
 docker compose build && docker compose up -d
 ```
 
@@ -134,7 +134,7 @@ Works with any PHP application: WordPress, Laravel, Drupal, custom apps — anyt
 
 ## Links
 
-- **GitHub:** https://github.com/Taz1920/php-sentinel
+- **GitHub:** https://github.com/Taz1920/php-canarywall
 - **License:** MIT
 
 Built by Ryan TJ. Open source. Free forever.

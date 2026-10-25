@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PHP Sentinel — Kill Test
+PHP CanaryWall — Kill Test
 
 Actually tries to crash canary workers through multiple attack vectors,
 then verifies the proxy blocked every one. Run against your local stack.
@@ -69,7 +69,7 @@ async def send(session, name, method="POST", path="/", headers=None, body=b"", e
 
 async def main():
     print(f"\n{'='*75}")
-    print(f"  PHP Sentinel Kill Test — {TARGET}")
+    print(f"  PHP CanaryWall Kill Test — {TARGET}")
     print(f"{'='*75}\n")
 
     async with aiohttp.ClientSession() as s:

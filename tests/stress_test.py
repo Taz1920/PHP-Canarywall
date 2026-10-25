@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PHP Sentinel — Stress Test Suite
+PHP CanaryWall — Stress Test Suite
 
 Sends crafted payloads that target the PHP SAPI parsing code paths
 CVE-2026-109618 (OOM corruption) and CVE-2026-109619 (cross-request
@@ -450,7 +450,7 @@ async def run_flood(
 
 async def run_suite(target: str, workers: int, flood_rps: int, flood_duration: int):
     print(f"\n{'='*70}")
-    print(f"  PHP Sentinel Stress Test")
+    print(f"  PHP CanaryWall Stress Test")
     print(f"  Target: {target}")
     print(f"{'='*70}\n")
 
@@ -521,7 +521,7 @@ async def run_suite(target: str, workers: int, flood_rps: int, flood_duration: i
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PHP Sentinel Stress Test")
+    parser = argparse.ArgumentParser(description="PHP CanaryWall Stress Test")
     parser.add_argument("--target", default="http://localhost:8080", help="Sentinel URL")
     parser.add_argument("--workers", type=int, default=8, help="Concurrent workers for flood test")
     parser.add_argument("--flood-rps", type=int, default=50, help="Requests per second during flood")

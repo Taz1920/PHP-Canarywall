@@ -1,4 +1,4 @@
-# PHP Sentinel — Full Canary Array (PHP 5.6 through 8.4)
+# PHP CanaryWall — Full Canary Array (PHP 5.6 through 8.4)
 
 x-canary-base: &canary-base
   expose:
@@ -23,8 +23,8 @@ x-canary-base: &canary-base
 
 services:
   sentinel:
-    image: php-sentinel-sentinel:latest
-    container_name: php-sentinel
+    image: php-canarywall-sentinel:latest
+    container_name: php-canarywall
     ports:
       - "8080:8080"
       # - "127.0.0.1:9090:9090"  # admin port — host-only; uncomment with SENTINEL_ADMIN_PORT
@@ -75,17 +75,17 @@ services:
       - sentinel-net
       - canary-net
 
-  canary-84: { <<: *canary-base, image: "php-sentinel-canary-84:latest", container_name: sentinel-canary-84, deploy: { resources: { limits: { memory: 256M, cpus: "0.5" } } } }
-  canary-83: { <<: *canary-base, image: "php-sentinel-canary-83:latest", container_name: sentinel-canary-83, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
-  canary-82: { <<: *canary-base, image: "php-sentinel-canary-82:latest", container_name: sentinel-canary-82, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
-  canary-81: { <<: *canary-base, image: "php-sentinel-canary-81:latest", container_name: sentinel-canary-81, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
-  canary-80: { <<: *canary-base, image: "php-sentinel-canary-80:latest", container_name: sentinel-canary-80, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
-  canary-74: { <<: *canary-base, image: "php-sentinel-canary-74:latest", container_name: sentinel-canary-74, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
-  canary-73: { <<: *canary-base, image: "php-sentinel-canary-73:latest", container_name: sentinel-canary-73, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
-  canary-72: { <<: *canary-base, image: "php-sentinel-canary-72:latest", container_name: sentinel-canary-72, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
-  canary-71: { <<: *canary-base, image: "php-sentinel-canary-71:latest", container_name: sentinel-canary-71, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
-  canary-70: { <<: *canary-base, image: "php-sentinel-canary-70:latest", container_name: sentinel-canary-70, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
-  canary-56: { <<: *canary-base, image: "php-sentinel-canary-56:latest", container_name: sentinel-canary-56, deploy: { resources: { limits: { memory: 64M, cpus: "0.5" } } } }
+  canary-84: { <<: *canary-base, image: "php-canarywall-canary-84:latest", container_name: sentinel-canary-84, deploy: { resources: { limits: { memory: 256M, cpus: "0.5" } } } }
+  canary-83: { <<: *canary-base, image: "php-canarywall-canary-83:latest", container_name: sentinel-canary-83, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
+  canary-82: { <<: *canary-base, image: "php-canarywall-canary-82:latest", container_name: sentinel-canary-82, deploy: { resources: { limits: { memory: 192M, cpus: "0.5" } } } }
+  canary-81: { <<: *canary-base, image: "php-canarywall-canary-81:latest", container_name: sentinel-canary-81, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
+  canary-80: { <<: *canary-base, image: "php-canarywall-canary-80:latest", container_name: sentinel-canary-80, deploy: { resources: { limits: { memory: 128M, cpus: "0.5" } } } }
+  canary-74: { <<: *canary-base, image: "php-canarywall-canary-74:latest", container_name: sentinel-canary-74, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-73: { <<: *canary-base, image: "php-canarywall-canary-73:latest", container_name: sentinel-canary-73, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-72: { <<: *canary-base, image: "php-canarywall-canary-72:latest", container_name: sentinel-canary-72, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-71: { <<: *canary-base, image: "php-canarywall-canary-71:latest", container_name: sentinel-canary-71, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-70: { <<: *canary-base, image: "php-canarywall-canary-70:latest", container_name: sentinel-canary-70, deploy: { resources: { limits: { memory: 96M, cpus: "0.5" } } } }
+  canary-56: { <<: *canary-base, image: "php-canarywall-canary-56:latest", container_name: sentinel-canary-56, deploy: { resources: { limits: { memory: 64M, cpus: "0.5" } } } }
 
   backend:
     image: php:8.1-apache

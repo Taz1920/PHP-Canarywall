@@ -1,4 +1,4 @@
-# PHP Sentinel — Canary Container (Multi-Version)
+# PHP CanaryWall — Canary Container (Multi-Version)
 ARG PHP_IMAGE=php:8.4-fpm
 FROM ${PHP_IMAGE}
 
