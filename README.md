@@ -1,5 +1,7 @@
 # PHP CanaryWall
 
+> Formerly known as **PHP Sentinel**. If you followed an old link or reference, you're in the right place — GitHub redirects the old URL automatically.
+
 A reverse proxy that defends PHP applications against CVE-2026-109618 and the known public exploits for CVE-2026-109619 (php2shell). Two layers of protection:
 
 1. **Upload-progress filter** (primary) — blocks any multipart request containing `PHP_SESSION_UPLOAD_PROGRESS`, the attack surface used by CVE-2026-109618 and all known public CVE-2026-109619 exploits. Deterministic, no latency cost. Note: CVE-2026-109619 has other confirmed trigger paths (e.g. `fatal_error_backtraces` on PHP 8.5 mod_php) that do not go through upload progress — the filter does not cover those.
