@@ -1,4 +1,4 @@
-# PHP Sentinel
+# PHP-Canarywall
 
 A reverse proxy that defends PHP applications against CVE-2026-109618 and the known public exploits for CVE-2026-109619 (php2shell). Two layers of protection:
 
